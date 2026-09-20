@@ -21,7 +21,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.0.0";
+const std::string CURRENT_VERSION = "v1.0.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 // Global Persistent Caches & Rendering Buffer
