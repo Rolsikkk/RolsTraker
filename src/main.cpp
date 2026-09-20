@@ -20,6 +20,10 @@ using json = nlohmann::json;
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "ws2_32.lib")
 
+// Application Version Constant
+const std::string CURRENT_VERSION = "v1.0.0";
+const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
+
 // Global Persistent Caches & Rendering Buffer
 static std::map<std::string, std::pair<std::string, std::string>> g_nameCache;
 static std::map<std::string, std::pair<int, int>> g_rankCache;
@@ -198,6 +202,172 @@ HttpResponse httpRequest(
     return response;
 }
 
+bool downloadFileWithRedirects(const std::string& initialUrl, const std::string& outputPath) {
+    std::string currentUrl = initialUrl;
+    for (int redirectCount = 0; redirectCount < 5; redirectCount++) {
+        std::string host, path;
+        size_t protoPos = currentUrl.find("://");
+        std::string urlWithoutProto = (protoPos != std::string::npos) ? currentUrl.substr(protoPos + 3) : currentUrl;
+        size_t slashPos = urlWithoutProto.find('/');
+        if (slashPos != std::string::npos) {
+            host = urlWithoutProto.substr(0, slashPos);
+            path = urlWithoutProto.substr(slashPos);
+        } else {
+            host = urlWithoutProto;
+            path = "/";
+        }
+
+        HINTERNET hSession = WinHttpOpen(L"RolsTraker-Downloader/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!hSession) return false;
+
+        std::wstring wHost(host.begin(), host.end());
+        HINTERNET hConnect = WinHttpConnect(hSession, wHost.c_str(), 443, 0);
+        if (!hConnect) {
+            WinHttpCloseHandle(hSession);
+            return false;
+        }
+
+        std::wstring wPath(path.begin(), path.end());
+        HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", wPath.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
+        if (!hRequest) {
+            WinHttpCloseHandle(hConnect);
+            WinHttpCloseHandle(hSession);
+            return false;
+        }
+
+        std::wstring wHeaders = L"User-Agent: RolsTraker-App\r\nAccept: */*\r\n";
+        BOOL bResults = WinHttpSendRequest(hRequest, wHeaders.c_str(), (DWORD)wHeaders.length(), WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
+        if (bResults) bResults = WinHttpReceiveResponse(hRequest, NULL);
+
+        if (bResults) {
+            DWORD dwStatusCode = 0;
+            DWORD dwSize = sizeof(dwStatusCode);
+            WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &dwStatusCode, &dwSize, WINHTTP_NO_HEADER_INDEX);
+
+            if (dwStatusCode == 301 || dwStatusCode == 302 || dwStatusCode == 307 || dwStatusCode == 308) {
+                wchar_t locationBuffer[2048] = {0};
+                DWORD locationSize = sizeof(locationBuffer);
+                if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, locationBuffer, &locationSize, WINHTTP_NO_HEADER_INDEX)) {
+                    std::wstring wLoc(locationBuffer);
+                    currentUrl = std::string(wLoc.begin(), wLoc.end());
+                    WinHttpCloseHandle(hRequest);
+                    WinHttpCloseHandle(hConnect);
+                    WinHttpCloseHandle(hSession);
+                    continue;
+                }
+            }
+
+            if (dwStatusCode == 200) {
+                std::ofstream outFile(outputPath, std::ios::binary);
+                if (!outFile.is_open()) {
+                    WinHttpCloseHandle(hRequest);
+                    WinHttpCloseHandle(hConnect);
+                    WinHttpCloseHandle(hSession);
+                    return false;
+                }
+
+                DWORD dwDownloaded = 0;
+                do {
+                    dwSize = 0;
+                    if (!WinHttpQueryDataAvailable(hRequest, &dwSize)) break;
+                    if (dwSize == 0) break;
+                    std::vector<char> buffer(dwSize);
+                    if (WinHttpReadData(hRequest, (LPVOID)buffer.data(), dwSize, &dwDownloaded)) {
+                        outFile.write(buffer.data(), dwDownloaded);
+                    }
+                } while (dwSize > 0);
+
+                outFile.close();
+                WinHttpCloseHandle(hRequest);
+                WinHttpCloseHandle(hConnect);
+                WinHttpCloseHandle(hSession);
+                return true;
+            }
+        }
+
+        WinHttpCloseHandle(hRequest);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        break;
+    }
+    return false;
+}
+
+// -----------------------------------------------------------------------------
+// Auto-Updater Module
+// -----------------------------------------------------------------------------
+const std::string RESET         = "\033[0m";
+const std::string BOLD          = "\033[1m";
+const std::string COLOR_RED     = "\033[1;31m";
+const std::string COLOR_BLUE    = "\033[1;34m";
+const std::string COLOR_CYAN    = "\033[1;36m";
+const std::string COLOR_GREEN   = "\033[1;32m";
+const std::string COLOR_YELLOW  = "\033[1;33m";
+const std::string COLOR_MAGENTA = "\033[1;35m";
+const std::string COLOR_BR_BLUE = "\033[1;94m";
+const std::string COLOR_GRAY    = "\033[90m";
+const std::string COLOR_WHITE   = "\033[1;97m";
+
+void checkAutoUpdate() {
+    std::cout << COLOR_CYAN << "Проверка обновлений на GitHub (" << GITHUB_REPO << ")...\n" << RESET;
+
+    std::map<std::string, std::string> headers = {
+        {"User-Agent", "RolsTraker-App"},
+        {"Accept", "application/vnd.github.v3+json"}
+    };
+
+    auto res = httpRequest("GET", "api.github.com", 443, "/repos/" + GITHUB_REPO + "/releases/latest", headers, "", true, false);
+    if (res.statusCode == 200) {
+        try {
+            auto j = json::parse(res.body);
+            std::string latestTag = getJsonKeyStr(j, {"tag_name"});
+            if (!latestTag.empty() && latestTag != CURRENT_VERSION) {
+                std::string downloadUrl;
+                if (j.contains("assets") && j["assets"].is_array()) {
+                    for (const auto& asset : j["assets"]) {
+                        std::string name = getJsonKeyStr(asset, {"name"});
+                        if (name == "RolsTraker.exe") {
+                            downloadUrl = getJsonKeyStr(asset, {"browser_download_url"});
+                            break;
+                        }
+                    }
+                }
+
+                if (downloadUrl.empty() && !latestTag.empty()) {
+                    downloadUrl = "https://github.com/" + GITHUB_REPO + "/releases/download/" + latestTag + "/RolsTraker.exe";
+                }
+
+                std::cout << COLOR_GREEN << "\n [!] Найдено обновление! (Текущая: " << CURRENT_VERSION << ", Новая: " << latestTag << ")\n" << RESET;
+                std::cout << " Скачивание обновленного файла RolsTraker.exe...\n";
+
+                if (downloadFileWithRedirects(downloadUrl, "RolsTraker_new.exe")) {
+                    std::cout << COLOR_CYAN << " Обновление успешно скачано! Перезапуск программы...\n" << RESET;
+
+                    std::ofstream updater("updater.bat");
+                    if (updater.is_open()) {
+                        updater << "@echo off\n";
+                        updater << "timeout /t 1 /nobreak > nul\n";
+                        updater << "copy /y RolsTraker_new.exe RolsTraker.exe > nul\n";
+                        updater << "del /f /q RolsTraker_new.exe > nul\n";
+                        updater << "start RolsTraker.exe\n";
+                        updater << "del \"%~f0\"\n";
+                        updater.close();
+                    }
+
+                    WinExec("cmd /c updater.bat", SW_HIDE);
+                    exit(0);
+                } else {
+                    std::cout << COLOR_RED << " Ошибка при скачивании файла обновления.\n" << RESET;
+                }
+            } else {
+                std::cout << COLOR_GRAY << " У вас установлена актуальная версия (" << CURRENT_VERSION << ").\n" << RESET;
+            }
+        } catch (...) {}
+    } else {
+        std::cout << COLOR_GRAY << " Проверка обновлений завершена.\n" << RESET;
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Data Structures & Models
 // -----------------------------------------------------------------------------
@@ -240,21 +410,6 @@ struct MatchState {
     std::string mapName;
     std::vector<PlayerInfo> players;
 };
-
-// -----------------------------------------------------------------------------
-// ANSI Color Constants & Rank Formatting
-// -----------------------------------------------------------------------------
-const std::string RESET         = "\033[0m";
-const std::string BOLD          = "\033[1m";
-const std::string COLOR_RED     = "\033[1;31m";
-const std::string COLOR_BLUE    = "\033[1;34m";
-const std::string COLOR_CYAN    = "\033[1;36m";
-const std::string COLOR_GREEN   = "\033[1;32m";
-const std::string COLOR_YELLOW  = "\033[1;33m";
-const std::string COLOR_MAGENTA = "\033[1;35m";
-const std::string COLOR_BR_BLUE = "\033[1;94m";
-const std::string COLOR_GRAY    = "\033[90m";
-const std::string COLOR_WHITE   = "\033[1;97m";
 
 struct RankDisplay {
     std::string name;
@@ -759,7 +914,7 @@ void renderConsole(const MatchState& state, const Session& session, const Lockfi
     std::ostringstream ss;
 
     ss << BOLD << COLOR_CYAN << "==================================================================================================\n";
-    ss << "                                     ROLSTRAKER (Valorant Tracker)\n";
+    ss << "                                     ROLSTRAKER (" << CURRENT_VERSION << ")\n";
     ss << "==================================================================================================\n" << RESET;
 
     if (lock.port == 0) {
@@ -931,7 +1086,9 @@ void renderConsole(const MatchState& state, const Session& session, const Lockfi
 int main() {
     enableVTMode();
 
-    std::cout << "Запуск RolsTraker...\n";
+    std::cout << BOLD << COLOR_CYAN << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n" << RESET;
+    checkAutoUpdate();
+
     std::cout << "Загрузка метаданных агентов и карт Valorant...\n";
     auto agentMap = getAgentMap();
     auto mapNameMap = getMapNameMap();
