@@ -11,6 +11,8 @@
 #include <regex>
 #include <chrono>
 #include <thread>
+#include <mutex>
+#include <atomic>
 #include <iomanip>
 
 #include <nlohmann/json.hpp>
@@ -21,15 +23,28 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.0.1";
+const std::string CURRENT_VERSION = "v1.0.2";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
-// Global Persistent Caches & Rendering Buffer
+struct PlayerStats {
+    float kdRatio = -1.0f;
+};
+struct RankCacheEntry {
+    int tier;
+    int rr;
+    int wins;
+    int losses;
+};
 static std::map<std::string, std::pair<std::string, std::string>> g_nameCache;
-static std::map<std::string, std::pair<int, int>> g_rankCache;
+static std::map<std::string, RankCacheEntry> g_rankCache;
+static std::map<std::string, PlayerStats> g_statsCache;
+static std::set<std::string> g_statsFetching;
+static std::map<std::string, std::map<std::string, std::pair<int, int>>> g_matchDetailsCache;
 static std::string g_lastRenderedOutput;
 static std::string g_lastPhase;
 static std::string g_lastMatchId;
+static std::mutex g_mutex;
+static std::atomic<bool> g_running{true};
 
 // -----------------------------------------------------------------------------
 // UTF-8 Visual Character Length & Padding Helpers for Alignment
@@ -116,6 +131,9 @@ struct HttpResponse {
     std::string body;
 };
 
+static HINTERNET g_hSession = nullptr;
+static std::mutex g_httpMutex;
+
 HttpResponse httpRequest(
     const std::string& method,
     const std::string& host,
@@ -127,13 +145,18 @@ HttpResponse httpRequest(
     bool ignoreCert = false
 ) {
     HttpResponse response;
-    HINTERNET hSession = WinHttpOpen(L"RolsTraker/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!hSession) return response;
+
+    if (!g_hSession) {
+        std::lock_guard<std::mutex> lk(g_httpMutex);
+        if (!g_hSession) {
+            g_hSession = WinHttpOpen(L"RolsTraker/1.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        }
+    }
+    if (!g_hSession) return response;
 
     std::wstring wHost(host.begin(), host.end());
-    HINTERNET hConnect = WinHttpConnect(hSession, wHost.c_str(), port, 0);
+    HINTERNET hConnect = WinHttpConnect(g_hSession, wHost.c_str(), port, 0);
     if (!hConnect) {
-        WinHttpCloseHandle(hSession);
         return response;
     }
 
@@ -144,7 +167,6 @@ HttpResponse httpRequest(
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, wMethod.c_str(), wPath.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, dwFlags);
     if (!hRequest) {
         WinHttpCloseHandle(hConnect);
-        WinHttpCloseHandle(hSession);
         return response;
     }
 
@@ -198,7 +220,6 @@ HttpResponse httpRequest(
 
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);
-    WinHttpCloseHandle(hSession);
     return response;
 }
 
@@ -401,6 +422,9 @@ struct PlayerInfo {
     std::string agentName;
     int rankTier = 0;
     int rankRR = 0;
+    float kdRatio = -1.0f;
+    int wins = -1;
+    int losses = -1;
 };
 
 struct MatchState {
@@ -747,6 +771,79 @@ MatchState getLiveMatchState(const Session& session, const Lockfile& lock) {
     return state;
 }
 
+// -----------------------------------------------------------------------------
+// Fetch K/D + W/L from match history + competitive updates (fire-and-forget)
+// -----------------------------------------------------------------------------
+void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std::string> pdH) {
+    if (!g_running) return;
+
+    // === K/D: from match list + match details ===
+    auto mlr = httpRequest("GET", sess.pdHost, 443, "/match/v1/matchlist/" + puuid, pdH, "", true, false);
+    int kills = 0, deaths = 0; bool kdOk = false;
+    if (mlr.statusCode == 200) {
+        try {
+            auto jm = json::parse(mlr.body);
+            if (jm.contains("History") && jm["History"].is_array()) {
+                int count = 0;
+                for (auto& hm : jm["History"]) {
+                    if (!g_running) return;
+                    if (count >= 5) break;
+                    std::string mid = getJsonKeyStr(hm, {"MatchID"});
+                    bool foundInCache = false;
+                    {
+                        std::lock_guard<std::mutex> lk(g_mutex);
+                        if (g_matchDetailsCache.count(mid)) {
+                            if (g_matchDetailsCache[mid].count(puuid)) {
+                                kills += g_matchDetailsCache[mid][puuid].first;
+                                deaths += g_matchDetailsCache[mid][puuid].second;
+                                kdOk = true; count++;
+                            }
+                            foundInCache = true;
+                        }
+                    }
+                    if (foundInCache) continue;
+
+                    auto mr = httpRequest("GET", sess.pdHost, 443, "/match/v1/matches/" + mid, pdH, "", true, false);
+                    if (mr.statusCode == 200) {
+                        auto md = json::parse(mr.body);
+                        if (md.contains("players") && md["players"].is_array()) {
+                            std::map<std::string, std::pair<int, int>> matchStats;
+                            for (auto& p : md["players"]) {
+                                std::string subject = getJsonKeyStr(p, {"subject"});
+                                if (p.contains("stats") && p["stats"].is_object()) {
+                                    int pk = 0, pd = 0;
+                                    if (p["stats"].contains("kills") && p["stats"]["kills"].is_number()) pk = p["stats"]["kills"].get<int>();
+                                    if (p["stats"].contains("deaths") && p["stats"]["deaths"].is_number()) pd = p["stats"]["deaths"].get<int>();
+                                    matchStats[subject] = {pk, pd};
+                                }
+                            }
+                            {
+                                std::lock_guard<std::mutex> lk(g_mutex);
+                                g_matchDetailsCache[mid] = matchStats;
+                            }
+                            if (matchStats.count(puuid)) {
+                                kills += matchStats[puuid].first;
+                                deaths += matchStats[puuid].second;
+                                kdOk = true; count++;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (...) {}
+    }
+
+    float finalKd = kdOk ? (deaths > 0 ? (float)kills / (float)deaths : (float)kills) : -2.0f;
+
+    {
+        std::lock_guard<std::mutex> lk(g_mutex);
+        if (g_statsFetching.count(puuid)) {
+            g_statsCache[puuid] = {finalKd};
+            g_statsFetching.erase(puuid);
+        }
+    }
+}
+
 void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>& players) {
     if (players.empty()) return;
 
@@ -761,8 +858,10 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
         }
 
         if (g_rankCache.count(p.puuid)) {
-            p.rankTier = g_rankCache[p.puuid].first;
-            p.rankRR = g_rankCache[p.puuid].second;
+            p.rankTier = g_rankCache[p.puuid].tier;
+            p.rankRR = g_rankCache[p.puuid].rr;
+            p.wins = g_rankCache[p.puuid].wins;
+            p.losses = g_rankCache[p.puuid].losses;
         }
     }
 
@@ -809,8 +908,10 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
     // 2. Resolve uncached ranks (MMR)
     for (auto& p : players) {
         if (g_rankCache.count(p.puuid)) {
-            p.rankTier = g_rankCache[p.puuid].first;
-            p.rankRR = g_rankCache[p.puuid].second;
+            p.rankTier = g_rankCache[p.puuid].tier;
+            p.rankRR = g_rankCache[p.puuid].rr;
+            p.wins = g_rankCache[p.puuid].wins;
+            p.losses = g_rankCache[p.puuid].losses;
             continue;
         }
 
@@ -818,6 +919,8 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
         if (mmrRes.statusCode == 200) {
             int tier = 0;
             int rr = 0;
+            int totalWins = 0;
+            int totalGames = 0;
             try {
                 auto j = json::parse(mmrRes.body);
 
@@ -869,13 +972,36 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                                 }
                             }
                         }
+                        
+                        // Parse all-time W/L
+                        for (const auto& [sId, sData] : seasons.items()) {
+                            if (sData.contains("NumberOfGames") && sData["NumberOfGames"].is_number()) {
+                                totalGames += sData["NumberOfGames"].get<int>();
+                            }
+                            if (sData.contains("NumberOfWinsWithPlacements") && sData["NumberOfWinsWithPlacements"].is_number()) {
+                                totalWins += sData["NumberOfWinsWithPlacements"].get<int>();
+                            }
+                        }
                     }
                 }
             } catch (...) {}
 
-            g_rankCache[p.puuid] = {tier, rr};
+            g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins};
             p.rankTier = tier;
             p.rankRR = rr;
+            p.wins = totalWins;
+            p.losses = totalGames - totalWins;
+        }
+    }
+
+    // 3. Resolve K/D asynchronously
+    for (auto& p : players) {
+        std::lock_guard<std::mutex> lk(g_mutex);
+        if (g_statsCache.count(p.puuid)) {
+            p.kdRatio = g_statsCache[p.puuid].kdRatio;
+        } else if (!g_statsFetching.count(p.puuid)) {
+            g_statsFetching.insert(p.puuid);
+            std::thread(fetchPlayerStats, session, p.puuid, pdHeaders).detach();
         }
     }
 }
@@ -951,7 +1077,7 @@ void renderConsole(const MatchState& state, const Session& session, const Lockfi
             ss << BOLD << COLOR_WHITE << " | Карта: " << RESET << COLOR_YELLOW << displayMapName << RESET;
         }
         ss << BOLD << COLOR_WHITE << " | Сервер: " << RESET << COLOR_CYAN << session.region << RESET << "\n";
-        ss << COLOR_GRAY << "--------------------------------------------------------------------------------------------------\n" << RESET;
+        ss << COLOR_GRAY << "------------------------------------------------------------------------------------------------------------------\n" << RESET;
 
         // Divide into Team 1 and Team 2
         std::vector<PlayerInfo> team1, team2;
@@ -968,9 +1094,9 @@ void renderConsole(const MatchState& state, const Session& session, const Lockfi
 
         auto printTeamTable = [&](const std::string& teamTitle, const std::string& titleColor, const std::vector<PlayerInfo>& team) {
             ss << BOLD << titleColor << "\n " << teamTitle << RESET << "\n";
-            ss << COLOR_GRAY << " --------------------------------------------------------------------------------------------------\n" << RESET;
-            ss << BOLD << "  Маркер  Игрок (Ник#Тег)            Агент          Ранг                    Пати\n" << RESET;
-            ss << COLOR_GRAY << " --------------------------------------------------------------------------------------------------\n" << RESET;
+            ss << COLOR_GRAY << " ------------------------------------------------------------------------------------------------------------------\n" << RESET;
+            ss << BOLD << "  Маркер  Игрок (Ник#Тег)            Агент        Ранг                 K/D     W/L      Пати\n" << RESET;
+            ss << COLOR_GRAY << " ------------------------------------------------------------------------------------------------------------------\n" << RESET;
 
             for (const auto& p : team) {
                 std::string fullName = p.gameName + (p.tagLine.empty() ? "" : "#" + p.tagLine);
@@ -988,11 +1114,21 @@ void renderConsole(const MatchState& state, const Session& session, const Lockfi
                 }
 
                 std::string agent = agentMap.count(p.characterId) ? agentMap.at(p.characterId) : (p.characterId.empty() ? "Выбирает..." : "Агент");
-                if (utf8_length(agent) > 14) agent = agent.substr(0, 11) + "...";
+                if (utf8_length(agent) > 12) agent = agent.substr(0, 9) + "...";
 
                 RankDisplay rankInfo = formatRank(p.rankTier, p.rankRR);
                 std::string rankStr = rankInfo.name;
-                if (utf8_length(rankStr) > 22) rankStr = rankStr.substr(0, 19) + "...";
+                if (utf8_length(rankStr) > 20) rankStr = rankStr.substr(0, 17) + "...";
+
+                std::string kdStr = "...";
+                if (p.kdRatio == -2.0f) kdStr = "N/A";
+                else if (p.kdRatio != -1.0f) {
+                    std::ostringstream oss; oss << std::fixed << std::setprecision(2) << p.kdRatio; kdStr = oss.str();
+                }
+
+                std::string wlStr = "...";
+                if (p.wins == -2) wlStr = "N/A";
+                else if (p.wins != -1) wlStr = std::to_string(p.wins) + "/" + std::to_string(p.losses);
 
                 std::string markStr;
                 std::string partyStatus;
@@ -1008,8 +1144,10 @@ void renderConsole(const MatchState& state, const Session& session, const Lockfi
 
                 ss << markStr << " "
                    << padRightUtf8(fullName, 26) << " "
-                   << padRightUtf8(agent, 14) << " "
-                   << rankInfo.color << padRightUtf8(rankStr, 23) << RESET << " "
+                   << padRightUtf8(agent, 12) << " "
+                   << rankInfo.color << padRightUtf8(rankStr, 20) << RESET << " "
+                   << padRightUtf8(kdStr, 7) << " "
+                   << padRightUtf8(wlStr, 8) << " "
                    << partyStatus << "\n";
             }
         };
@@ -1018,7 +1156,7 @@ void renderConsole(const MatchState& state, const Session& session, const Lockfi
         printTeamTable("[КОМАНДА 2 / АТАКУЮЩИЕ (BLUE)]", COLOR_BLUE, team2);
 
         // Party Summary Section
-        ss << COLOR_GRAY << "\n--------------------------------------------------------------------------------------------------\n" << RESET;
+        ss << COLOR_GRAY << "\n------------------------------------------------------------------------------------------------------------------\n" << RESET;
         ss << BOLD << COLOR_WHITE << " СВОДКА ГРУПП (PARTY SUMMARY):\n" << RESET;
 
         if (partyGroupMap.empty()) {
@@ -1050,7 +1188,7 @@ void renderConsole(const MatchState& state, const Session& session, const Lockfi
             }
         }
 
-        ss << COLOR_GRAY << "--------------------------------------------------------------------------------------------------\n" << RESET;
+        ss << COLOR_GRAY << "------------------------------------------------------------------------------------------------------------------\n" << RESET;
         ss << COLOR_GRAY << " Нажмите [R] для обновления | [Q] для выхода\n" << RESET;
         ss << BOLD << COLOR_CYAN << "==================================================================================================\n" << RESET;
     }
