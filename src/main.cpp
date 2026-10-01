@@ -29,7 +29,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.6";
+const std::string CURRENT_VERSION = "v1.1.7";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -669,7 +669,7 @@ Session getSession(const Lockfile& lock) {
 // -----------------------------------------------------------------------------
 std::map<std::string, std::string> getAgentMap() {
     std::map<std::string, std::string> agents;
-    auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/agents?isPlayableCharacter=true", {}, "", true, false);
+    auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/agents", {}, "", true, false);
     if (res.statusCode == 200) {
         try {
             auto j = json::parse(res.body);
@@ -1140,7 +1140,19 @@ int main() {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
 
-    // Windows Console is no longer forcefully resized to respect user's default.
+    // Disable Quick Edit Mode (prevents stopping program by clicking)
+    HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD prev_mode;
+    GetConsoleMode(hInput, &prev_mode);
+    SetConsoleMode(hInput, prev_mode & ~ENABLE_QUICK_EDIT_MODE);
+
+    // Automatically set optimal size
+    HWND console = GetConsoleWindow();
+    if (console) {
+        RECT r;
+        GetWindowRect(console, &r);
+        MoveWindow(console, r.left, r.top, 1300, 750, TRUE);
+    }
 
     std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
     checkAutoUpdate();
@@ -1216,6 +1228,10 @@ int main() {
             g_running = false;
             screen.ExitLoopClosure()();
             return true;
+        }
+        
+        if (event == ftxui::Event::Special("\x03")) { // Ctrl+C
+            return true; 
         }
         
         if (event == ftxui::Event::Escape) {

@@ -4,11 +4,25 @@
 #include <vector>
 #include <algorithm>
 
+#include <windows.h>
+#undef RGB
+#include <fstream>
+
 using namespace ftxui;
 
 ftxui::Element renderImage(const std::string& path, int maxWidth, int maxHeight) {
+    std::string fullPath = path;
+    std::ifstream f(path.c_str());
+    if (!f.good()) {
+        char exePath[MAX_PATH];
+        GetModuleFileNameA(NULL, exePath, MAX_PATH);
+        std::string exeDir = std::string(exePath);
+        exeDir = exeDir.substr(0, exeDir.find_last_of("\\/"));
+        fullPath = exeDir + "/" + path;
+    }
+
     int width, height, channels;
-    unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 3);
+    unsigned char* data = stbi_load(fullPath.c_str(), &width, &height, &channels, 3);
     if (!data) {
         return text(" Ошибка загрузки изображения: " + path + " ") | color(Color::Red);
     }
