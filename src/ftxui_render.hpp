@@ -59,8 +59,7 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
         ftxui::text(" Агент ") | ftxui::bold,
         ftxui::text(" Ранг ") | ftxui::bold,
         ftxui::text(" K/D ") | ftxui::bold,
-        ftxui::text(" W/L ") | ftxui::bold,
-        ftxui::text(" Инфо ") | ftxui::bold
+        ftxui::text(" W/L ") | ftxui::bold
     });
 
     for (const auto& p : team) {
@@ -106,8 +105,7 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
             ftxui::text(" " + agent + " "),
             ftxui::text(" " + rankStr + " ") | ftxui::color(rColor),
             ftxui::text(" " + kdStr + " "),
-            ftxui::text(" " + wlStr + " "),
-            partyText
+            ftxui::text(" " + wlStr + " ")
         });
     }
 
@@ -183,31 +181,6 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     auto t1 = buildTeamTable(" [КОМАНДА 1 / ЗАЩИТНИКИ (RED)]", ftxui::Color::RedLight, team1, partyGroupMap, agentMap);
     auto t2 = buildTeamTable(" [КОМАНДА 2 / АТАКУЮЩИЕ (BLUE)]", ftxui::Color::BlueLight, team2, partyGroupMap, agentMap);
 
-    // Summary
-    ftxui::Elements summaryItems;
-    summaryItems.push_back(ftxui::text(" СВОДКА ГРУПП (PARTY SUMMARY):") | ftxui::bold);
-    
-    if (partyGroupMap.empty()) {
-        summaryItems.push_back(ftxui::text(" • Все игроки играют СОЛО") | ftxui::color(ftxui::Color::GrayLight));
-    } else {
-        std::map<int, std::vector<std::string>> groupMembers;
-        for (const auto& p : state.players) {
-            if (!p.partyId.empty() && partyGroupMap.count(p.partyId)) {
-                int gIdx = partyGroupMap[p.partyId].groupIndex;
-                std::string fullName = p.gameName + (p.tagLine.empty() ? "" : "#" + p.tagLine);
-                groupMembers[gIdx].push_back(fullName);
-            }
-        }
-        for (const auto& [gIdx, members] : groupMembers) {
-            ftxui::Color pColor = FTX_PARTY_COLORS[(gIdx - 1) % FTX_PARTY_COLORS.size()];
-            std::string s = " • Пати #" + std::to_string(gIdx) + " (" + std::to_string(members.size()) + " чел.): ";
-            for (size_t i = 0; i < members.size(); i++) {
-                s += members[i] + (i + 1 < members.size() ? ", " : "");
-            }
-            summaryItems.push_back(ftxui::text(s) | ftxui::color(pColor));
-        }
-    }
-
     return ftxui::vbox({
         ftxui::text("ROLSTRAKER (" + CURRENT_VERSION + ")") | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
         ftxui::separator(),
@@ -220,7 +193,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         }),
         ftxui::separator(),
         ftxui::hbox({
-            ftxui::vbox(summaryItems) | ftxui::flex,
+            ftxui::filler() | ftxui::flex,
             (g_myStatsBox.Contain(g_mouseX, g_mouseY) 
                 ? ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::inverted | ftxui::reflect(g_myStatsBox)
                 : ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::reflect(g_myStatsBox))
