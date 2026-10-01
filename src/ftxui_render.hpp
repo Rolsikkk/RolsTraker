@@ -17,6 +17,8 @@ extern std::string g_selectedPuuid;
 extern PlayerInfo g_selectedPlayerInfo;
 extern std::map<std::string, ftxui::Box> g_playerBoxes;
 extern ftxui::Box g_myStatsBox;
+extern int g_mouseX;
+extern int g_mouseY;
 
 // FTXUI colors for parties
 const std::vector<Color> FTX_PARTY_COLORS = {
@@ -93,9 +95,14 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
             partyText = ftxui::text(" Пати #" + std::to_string(pInfo.groupIndex) + " ") | ftxui::color(pColor) | ftxui::bold;
         }
 
+        auto nameElement = ftxui::text(" " + fullName + " ") | ftxui::reflect(g_playerBoxes[p.puuid]);
+        if (g_playerBoxes.count(p.puuid) && g_playerBoxes[p.puuid].Contain(g_mouseX, g_mouseY)) {
+            nameElement = nameElement | ftxui::inverted;
+        }
+
         rows.push_back({
             partyIcon,
-            ftxui::text(" " + fullName + " ") | ftxui::reflect(g_playerBoxes[p.puuid]),
+            nameElement,
             ftxui::text(" " + agent + " "),
             ftxui::text(" " + rankStr + " ") | ftxui::color(rColor),
             ftxui::text(" " + kdStr + " "),
@@ -214,7 +221,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         ftxui::separator(),
         ftxui::hbox({
             ftxui::vbox(summaryItems) | ftxui::flex,
-            ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::reflect(g_myStatsBox)
+            (g_myStatsBox.Contain(g_mouseX, g_mouseY) 
+                ? ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::inverted | ftxui::reflect(g_myStatsBox)
+                : ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::reflect(g_myStatsBox))
         })
     }) | ftxui::border;
 }

@@ -459,6 +459,8 @@ static std::string g_selectedPuuid = "";
 static PlayerInfo g_selectedPlayerInfo;
 static std::map<std::string, ftxui::Box> g_playerBoxes;
 static ftxui::Box g_myStatsBox;
+static int g_mouseX = -1;
+static int g_mouseY = -1;
 
 struct MatchState {
     std::string phase; // "coregame", "pregame", "none"
@@ -811,7 +813,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
     if (!g_running) return;
 
     // === K/D + Advanced Stats: from match list + match details ===
-    auto mlr = httpRequest("GET", sess.pdHost, 443, "/match/v1/matchlist/" + puuid, pdH, "", true, false);
+    auto mlr = httpRequest("GET", sess.pdHost, 443, "/match-history/v1/history/" + puuid, pdH, "", true, false);
     int kills = 0, deaths = 0, hs = 0, bs = 0, ls = 0;
     std::map<std::string, int> agentPlays;
     bool kdOk = false;
@@ -841,7 +843,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                     }
                     if (foundInCache) continue;
 
-                    auto mr = httpRequest("GET", sess.pdHost, 443, "/match/v1/matches/" + mid, pdH, "", true, false);
+                    auto mr = httpRequest("GET", sess.pdHost, 443, "/match-details/v1/matches/" + mid, pdH, "", true, false);
                     if (mr.statusCode == 200) {
                         auto md = json::parse(mr.body);
                         std::map<std::string, MatchDetailsCacheEntry> matchStats;
@@ -1167,6 +1169,11 @@ int main() {
             }
         }
         
+        if (event.is_mouse()) {
+            g_mouseX = event.mouse().x;
+            g_mouseY = event.mouse().y;
+        }
+
         if (event.is_mouse() && event.mouse().button == ftxui::Mouse::Left && event.mouse().motion == ftxui::Mouse::Released) {
             if (g_currentView == AppView::MAIN) {
                 // Check "My Stats" button
