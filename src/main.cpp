@@ -17,6 +17,12 @@
 
 #include <nlohmann/json.hpp>
 
+// FTXUI Headers
+#include <ftxui/dom/elements.hpp>
+#include <ftxui/dom/table.hpp>
+#include <ftxui/screen/screen.hpp>
+#include <ftxui/screen/string.hpp>
+
 using json = nlohmann::json;
 
 #pragma comment(lib, "winhttp.lib")
@@ -1006,225 +1012,15 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
     }
 }
 
-// -----------------------------------------------------------------------------
-// UI Rendering Engine (ANSI Colors & Anti-Flicker Buffer)
-// -----------------------------------------------------------------------------
-void enableVTMode() {
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (hOut == INVALID_HANDLE_VALUE) return;
-    DWORD dwMode = 0;
-    if (GetConsoleMode(hOut, &dwMode)) {
-        dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-        SetConsoleMode(hOut, dwMode);
-    }
-    SetConsoleOutputCP(CP_UTF8);
-}
-
-struct PartyColorInfo {
-    int groupIndex;
-    std::string ansiColor;
-    std::string name;
-};
-
-// Available vibrant colors for premade parties
-const std::vector<std::pair<std::string, std::string>> PARTY_COLORS = {
-    {COLOR_GREEN,   "Зеленый"},
-    {COLOR_CYAN,    "Голубой"},
-    {COLOR_YELLOW,  "Желтый"},
-    {COLOR_MAGENTA, "Пурпурный"},
-    {COLOR_RED,     "Красный"},
-    {COLOR_BR_BLUE, "Синий"}
-};
-
-void renderConsole(const MatchState& state, const Session& session, const Lockfile& lock, const std::map<std::string, std::string>& agentMap, const std::map<std::string, std::string>& mapNameMap) {
-    std::ostringstream ss;
-
-    ss << BOLD << COLOR_CYAN << "==================================================================================================\n";
-    ss << "                                     ROLSTRAKER (" << CURRENT_VERSION << ")\n";
-    ss << "==================================================================================================\n" << RESET;
-
-    if (lock.port == 0) {
-        ss << COLOR_RED << "\n [!] Riot Client не запущен! Ожидание запуска игры / Riot Client...\n" << RESET;
-        ss << COLOR_GRAY << " Автоматическая проверка каждые 3 секунды. Нажмите [Q] для выхода.\n" << RESET;
-    } else if (state.phase == "none") {
-        ss << COLOR_YELLOW << "\n [i] Riot Client подключен (Порт: " << lock.port << "). Ожидание матча / выбора агента...\n" << RESET;
-        ss << COLOR_GRAY << " Region: " << session.region << " | Shard: " << session.shard << RESET << "\n";
-        ss << COLOR_GRAY << " Нажмите [R] для принудительного обновления | [Q] для выхода.\n" << RESET;
-    } else {
-        // Party counts & Group Assignment
-        std::map<std::string, int> partyCounts;
-        for (const auto& p : state.players) {
-            if (!p.partyId.empty()) partyCounts[p.partyId]++;
-        }
-
-        std::map<std::string, PartyColorInfo> partyGroupMap;
-        int nextGroupIdx = 1;
-
-        for (const auto& p : state.players) {
-            if (!p.partyId.empty() && partyCounts[p.partyId] > 1 && partyGroupMap.find(p.partyId) == partyGroupMap.end()) {
-                int colorIdx = (nextGroupIdx - 1) % PARTY_COLORS.size();
-                partyGroupMap[p.partyId] = {nextGroupIdx, PARTY_COLORS[colorIdx].first, PARTY_COLORS[colorIdx].second};
-                nextGroupIdx++;
-            }
-        }
-
-        // Match Header Info
-        std::string displayMapName = mapNameMap.count(state.mapId) ? mapNameMap.at(state.mapId) : state.mapId;
-        std::string phaseStr = (state.phase == "coregame") ? "В ИГРЕ (Core Game)" : "ВЫБОР АГЕНТА (Agent Select)";
-
-        ss << BOLD << COLOR_WHITE << " Режим: " << RESET << COLOR_GREEN << phaseStr << RESET;
-        if (!displayMapName.empty()) {
-            ss << BOLD << COLOR_WHITE << " | Карта: " << RESET << COLOR_YELLOW << displayMapName << RESET;
-        }
-        ss << BOLD << COLOR_WHITE << " | Сервер: " << RESET << COLOR_CYAN << session.region << RESET << "\n";
-        ss << COLOR_GRAY << "------------------------------------------------------------------------------------------------------------------\n" << RESET;
-
-        // Divide into Team 1 and Team 2
-        std::vector<PlayerInfo> team1, team2;
-        for (const auto& p : state.players) {
-            if (p.teamId == "Red" || p.teamId == "Defender") {
-                team1.push_back(p);
-            } else if (p.teamId == "Blue" || p.teamId == "Attacker") {
-                team2.push_back(p);
-            } else {
-                if (team1.size() < 5) team1.push_back(p);
-                else team2.push_back(p);
-            }
-        }
-
-        auto printTeamTable = [&](const std::string& teamTitle, const std::string& titleColor, const std::vector<PlayerInfo>& team) {
-            ss << BOLD << titleColor << "\n " << teamTitle << RESET << "\n";
-            ss << COLOR_GRAY << " ------------------------------------------------------------------------------------------------------------------\n" << RESET;
-            ss << BOLD << "  Маркер  Игрок (Ник#Тег)            Агент        Ранг                 K/D     W/L      Пати\n" << RESET;
-            ss << COLOR_GRAY << " ------------------------------------------------------------------------------------------------------------------\n" << RESET;
-
-            for (const auto& p : team) {
-                std::string fullName = p.gameName + (p.tagLine.empty() ? "" : "#" + p.tagLine);
-                if (utf8_length(fullName) > 24) {
-                    std::string trimmed;
-                    size_t cnt = 0;
-                    for (size_t i = 0; i < fullName.length() && cnt < 21; ) {
-                        unsigned char c = fullName[i];
-                        size_t charLen = (c < 0x80) ? 1 : ((c & 0xE0) == 0xC0) ? 2 : ((c & 0xF0) == 0xE0) ? 3 : 4;
-                        trimmed += fullName.substr(i, charLen);
-                        i += charLen;
-                        cnt++;
-                    }
-                    fullName = trimmed + "...";
-                }
-
-                std::string agent = agentMap.count(p.characterId) ? agentMap.at(p.characterId) : (p.characterId.empty() ? "Выбирает..." : "Агент");
-                if (utf8_length(agent) > 12) agent = agent.substr(0, 9) + "...";
-
-                RankDisplay rankInfo = formatRank(p.rankTier, p.rankRR);
-                std::string rankStr = rankInfo.name;
-                if (utf8_length(rankStr) > 20) rankStr = rankStr.substr(0, 17) + "...";
-
-                std::string kdStr = "...";
-                if (p.kdRatio == -2.0f) kdStr = "N/A";
-                else if (p.kdRatio != -1.0f) {
-                    std::ostringstream oss; oss << std::fixed << std::setprecision(2) << p.kdRatio; kdStr = oss.str();
-                }
-
-                std::string wlStr = "...";
-                if (p.wins == -2) wlStr = "N/A";
-                else if (p.wins != -1) wlStr = std::to_string(p.wins) + "/" + std::to_string(p.losses);
-
-                std::string markStr;
-                std::string partyStatus;
-
-                if (!p.partyId.empty() && partyGroupMap.count(p.partyId)) {
-                    auto pInfo = partyGroupMap[p.partyId];
-                    markStr = pInfo.ansiColor + " [●] " + RESET;
-                    partyStatus = pInfo.ansiColor + "Пати #" + std::to_string(pInfo.groupIndex) + " (" + pInfo.name + ")" + RESET;
-                } else {
-                    markStr = COLOR_GRAY + " [○] " + RESET;
-                    partyStatus = COLOR_GRAY + "Соло" + RESET;
-                }
-
-                ss << markStr << " "
-                   << padRightUtf8(fullName, 26) << " "
-                   << padRightUtf8(agent, 12) << " "
-                   << rankInfo.color << padRightUtf8(rankStr, 20) << RESET << " "
-                   << padRightUtf8(kdStr, 7) << " "
-                   << padRightUtf8(wlStr, 8) << " "
-                   << partyStatus << "\n";
-            }
-        };
-
-        printTeamTable("[КОМАНДА 1 / ЗАЩИТНИКИ (RED)]", COLOR_RED, team1);
-        printTeamTable("[КОМАНДА 2 / АТАКУЮЩИЕ (BLUE)]", COLOR_BLUE, team2);
-
-        // Party Summary Section
-        ss << COLOR_GRAY << "\n------------------------------------------------------------------------------------------------------------------\n" << RESET;
-        ss << BOLD << COLOR_WHITE << " СВОДКА ГРУПП (PARTY SUMMARY):\n" << RESET;
-
-        if (partyGroupMap.empty()) {
-            ss << COLOR_GRAY << "  • Все игроки играют СОЛО (премейд группы не обнаружены)\n" << RESET;
-        } else {
-            std::map<int, std::vector<std::string>> groupMembers;
-            for (const auto& p : state.players) {
-                if (!p.partyId.empty() && partyGroupMap.count(p.partyId)) {
-                    int gIdx = partyGroupMap[p.partyId].groupIndex;
-                    std::string fullName = p.gameName + (p.tagLine.empty() ? "" : "#" + p.tagLine);
-                    groupMembers[gIdx].push_back(fullName);
-                }
-            }
-
-            for (const auto& [gIdx, members] : groupMembers) {
-                std::string colorCode;
-                for (const auto& [pid, pInfo] : partyGroupMap) {
-                    if (pInfo.groupIndex == gIdx) {
-                        colorCode = pInfo.ansiColor;
-                        break;
-                    }
-                }
-
-                ss << colorCode << "  • Пати #" << gIdx << " (" << members.size() << " чел.): " << RESET;
-                for (size_t i = 0; i < members.size(); i++) {
-                    ss << members[i] << (i + 1 < members.size() ? ", " : "");
-                }
-                ss << "\n";
-            }
-        }
-
-        ss << COLOR_GRAY << "------------------------------------------------------------------------------------------------------------------\n" << RESET;
-        ss << COLOR_GRAY << " Нажмите [R] для обновления | [Q] для выхода\n" << RESET;
-        ss << BOLD << COLOR_CYAN << "==================================================================================================\n" << RESET;
-    }
-
-    std::string currentOutput = ss.str();
-
-    // IF NOTHING HAS CHANGED, DO NOT TOUCH CONSOLE AT ALL! ZERO FLICKER!
-    if (currentOutput == g_lastRenderedOutput) {
-        return;
-    }
-
-    // Handle Match ID / Phase change transitions cleanly
-    if (state.matchId != g_lastMatchId || state.phase != g_lastPhase) {
-        g_lastMatchId = state.matchId;
-        g_lastPhase = state.phase;
-        std::cout << "\033[2J\033[H";
-    }
-
-    g_lastRenderedOutput = currentOutput;
-
-    // Reset cursor to top left
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    COORD pos = {0, 0};
-    SetConsoleCursorPosition(hOut, pos);
-
-    // Print current output followed by \033[J (erases any leftover lines from previous screen)
-    std::cout << currentOutput << "\033[J" << std::flush;
-}
+#include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/component/component.hpp>
+#include "ftxui_render.hpp"
 
 // -----------------------------------------------------------------------------
 // Main Loop
 // -----------------------------------------------------------------------------
 int main() {
-    enableVTMode();
-
-    std::cout << BOLD << COLOR_CYAN << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n" << RESET;
+    std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
     checkAutoUpdate();
 
     std::cout << "Загрузка метаданных агентов и карт Valorant...\n";
@@ -1237,53 +1033,65 @@ int main() {
     Session session;
     MatchState matchState;
 
-    bool forceRefresh = true;
-    auto lastCheck = std::chrono::steady_clock::now() - std::chrono::seconds(10);
-
-    while (true) {
-        auto now = std::chrono::steady_clock::now();
-        bool timeToRefresh = std::chrono::duration_cast<std::chrono::seconds>(now - lastCheck).count() >= 3;
-
-        if (timeToRefresh || forceRefresh) {
-            forceRefresh = false;
-            lastCheck = now;
-
-            lock = readLockfile();
-            if (lock.port != 0) {
-                session = getSession(lock);
-                if (!session.accessToken.empty()) {
-                    matchState = getLiveMatchState(session, lock);
-                    if (matchState.phase != "none") {
-                        // Merge presence party info if match party IDs are incomplete
-                        auto presencePartyMap = getPresencesPartyMap(lock);
-                        for (auto& p : matchState.players) {
-                            if (p.partyId.empty() && presencePartyMap.count(p.puuid)) {
-                                p.partyId = presencePartyMap[p.puuid];
+    auto screen = ftxui::ScreenInteractive::Fullscreen();
+    std::atomic<bool> refresh_ui = true;
+    
+    // Background polling thread
+    std::thread polling_thread([&]() {
+        auto lastCheck = std::chrono::steady_clock::now() - std::chrono::seconds(10);
+        while (g_running) {
+            auto now = std::chrono::steady_clock::now();
+            bool timeToRefresh = std::chrono::duration_cast<std::chrono::seconds>(now - lastCheck).count() >= 3;
+            
+            if (timeToRefresh) {
+                lastCheck = now;
+                lock = readLockfile();
+                if (lock.port != 0) {
+                    session = getSession(lock);
+                    if (!session.accessToken.empty()) {
+                        matchState = getLiveMatchState(session, lock);
+                        if (matchState.phase != "none") {
+                            auto presencePartyMap = getPresencesPartyMap(lock);
+                            for (auto& p : matchState.players) {
+                                if (p.partyId.empty() && presencePartyMap.count(p.puuid)) {
+                                    p.partyId = presencePartyMap[p.puuid];
+                                }
                             }
+                            resolveDisplayNamesAndRanks(session, matchState.players);
                         }
-                        resolveDisplayNamesAndRanks(session, matchState.players);
                     }
+                } else {
+                    matchState = MatchState();
                 }
-            } else {
-                matchState = MatchState();
+                
+                screen.PostEvent(ftxui::Event::Custom);
             }
-
-            renderConsole(matchState, session, lock, agentMap, mapNameMap);
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
+    });
 
-        if (_kbhit()) {
-            int ch = _getch();
-            if (ch == 'q' || ch == 'Q' || ch == 27) { // Q or ESC
-                std::cout << "\nЗавершение работы RolsTraker...\n";
-                break;
-            } else if (ch == 'r' || ch == 'R') {
-                forceRefresh = true;
-                g_lastRenderedOutput.clear();
-            }
+    // FTXUI Component
+    auto renderer = ftxui::Renderer([&] {
+        return renderFTXUI(matchState, session, lock, agentMap, mapNameMap);
+    });
+
+    // Catch 'q' to quit
+    renderer = ftxui::CatchEvent(renderer, [&](ftxui::Event event) {
+        if (event == ftxui::Event::Character('q') || event == ftxui::Event::Character('Q') || event == ftxui::Event::Escape) {
+            g_running = false;
+            screen.ExitLoopClosure()();
+            return true;
         }
+        return false;
+    });
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    screen.Loop(renderer);
+    
+    g_running = false;
+    if (polling_thread.joinable()) {
+        polling_thread.join();
     }
-
+    
+    std::cout << "\nЗавершение работы RolsTraker...\n";
     return 0;
 }
