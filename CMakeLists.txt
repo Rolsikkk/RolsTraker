@@ -8,6 +8,6 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_subdirectory(third_party/ftxui)
 
-add_executable(RolsTraker src/main.cpp src/ftxui_image.cpp)
+add_executable(RolsTraker src/main.cpp)
 
 target_link_libraries(RolsTraker PRIVATE ftxui::screen ftxui::dom ftxui::component winhttp ws2_32)

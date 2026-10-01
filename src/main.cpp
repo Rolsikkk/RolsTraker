@@ -33,6 +33,7 @@ const std::string CURRENT_VERSION = "v1.1.7";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
+    std::string matchId;
     std::string characterId;
     int kills = 0;
     int deaths = 0;
@@ -110,6 +111,12 @@ std::string padRightUtf8(const std::string& str, size_t targetWidth) {
     if (visLen >= targetWidth) return str;
     return str + std::string(targetWidth - visLen, ' ');
 }
+
+// -----------------------------------------------------------------------------
+// UI State & Bounding Boxes
+// -----------------------------------------------------------------------------
+static int g_statsMatchOffset = 0;
+static std::vector<ftxui::Box> g_matchBoxes;
 
 // -----------------------------------------------------------------------------
 // Base64 Helpers
@@ -845,7 +852,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                 int count = 0;
                 for (auto& hm : jm["History"]) {
                     if (!g_running) return;
-                    if (count >= 5) break;
+                    if (count >= 20) break;
                     std::string mid = getJsonKeyStr(hm, {"MatchID"});
                     bool foundInCache = false;
                     {
@@ -856,7 +863,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                                 kills += ms.kills; deaths += ms.deaths;
                                 hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
                                 if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
-                                recentMatches.push_back({ms.characterId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
+                                recentMatches.push_back({mid, ms.characterId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
                                 kdOk = true; count++;
                             }
                             foundInCache = true;
@@ -932,7 +939,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                             kills += ms.kills; deaths += ms.deaths;
                             hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
                             if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
-                            recentMatches.push_back({ms.characterId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
+                            recentMatches.push_back({mid, ms.characterId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
                             kdOk = true; count++;
                         }
                     }
@@ -1151,7 +1158,7 @@ int main() {
     if (console) {
         RECT r;
         GetWindowRect(console, &r);
-        MoveWindow(console, r.left, r.top, 1300, 750, TRUE);
+        MoveWindow(console, r.left, r.top, 1000, 600, TRUE);
     }
 
     std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
@@ -1279,6 +1286,43 @@ int main() {
                         return true;
                     }
                 }
+            } else if (g_currentView == AppView::PLAYER_STATS) {
+                // Check recent match clicks
+                for (size_t i = 0; i < g_matchBoxes.size(); ++i) {
+                    if (g_matchBoxes[i].Contain(event.mouse().x, event.mouse().y)) {
+                        int matchIdx = g_statsMatchOffset + i;
+                        if (matchIdx < g_selectedPlayerInfo.recentMatches.size()) {
+                            std::string matchId = g_selectedPlayerInfo.recentMatches[matchIdx].matchId;
+                            if (!matchId.empty()) {
+                                std::string url = "https://tracker.gg/valorant/match/" + matchId;
+                                ShellExecuteA(0, 0, url.c_str(), 0, 0, SW_SHOW);
+                            }
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        // Handle Scrolling in Stats View
+        if (g_currentView == AppView::PLAYER_STATS) {
+            if (event.is_mouse() && event.mouse().button == ftxui::Mouse::WheelUp) {
+                if (g_statsMatchOffset > 0) g_statsMatchOffset--;
+                return true;
+            }
+            if (event.is_mouse() && event.mouse().button == ftxui::Mouse::WheelDown) {
+                int maxOffset = std::max(0, (int)g_selectedPlayerInfo.recentMatches.size() - 8);
+                if (g_statsMatchOffset < maxOffset) g_statsMatchOffset++;
+                return true;
+            }
+            if (event == ftxui::Event::ArrowUp) {
+                if (g_statsMatchOffset > 0) g_statsMatchOffset--;
+                return true;
+            }
+            if (event == ftxui::Event::ArrowDown) {
+                int maxOffset = std::max(0, (int)g_selectedPlayerInfo.recentMatches.size() - 8);
+                if (g_statsMatchOffset < maxOffset) g_statsMatchOffset++;
+                return true;
             }
         }
         return false;

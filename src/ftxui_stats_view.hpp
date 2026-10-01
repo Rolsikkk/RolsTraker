@@ -5,16 +5,9 @@
 #include <string>
 #include <iomanip>
 #include <sstream>
+#include <algorithm>
 
 #include "ftxui_render.hpp"
-#include "ftxui_image.hpp"
-
-inline std::string padCenter(const std::string& str, size_t width) {
-    if (str.length() >= width) return str;
-    size_t left = (width - str.length()) / 2;
-    size_t right = width - str.length() - left;
-    return std::string(left, ' ') + str + std::string(right, ' ');
-}
 
 inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>& agentMap) {
     using namespace ftxui;
@@ -23,7 +16,6 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     
     std::string fullName = g_selectedPlayerInfo.gameName + "#" + g_selectedPlayerInfo.tagLine;
     
-    // Find favorite agent securely with case-insensitivity
     std::string favAgent = "Нет данных";
     int maxPlays = -1;
     for (const auto& [agentId, plays] : g_selectedPlayerInfo.agentPlays) {
@@ -55,24 +47,31 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     lsStream << std::fixed << std::setprecision(1) << lsPct << "%";
     kdStream << std::fixed << std::setprecision(2) << g_selectedPlayerInfo.kdRatio;
 
-    auto jettImage = renderImage("assets/jett.jpg", 18, 18);
-    auto bodyArt = hbox({
-        jettImage,
-        text("  "),
-        vbox({
-            filler(),
-            text("В голову (HS): " + (totalShots > 0 ? hsStream.str() : "N/A")) | color(Color::RedLight) | bold,
-            text("В тело (BS):   " + (totalShots > 0 ? bsStream.str() : "N/A")) | color(Color::YellowLight) | bold,
-            text("В ноги (LS):   " + (totalShots > 0 ? lsStream.str() : "N/A")) | color(Color::GrayLight) | bold,
-            filler()
-        })
-    }) | center;
+    auto bodyArt = vbox({
+        text("В голову (HS): " + (totalShots > 0 ? hsStream.str() : "N/A")) | color(Color::RedLight) | bold,
+        text("В тело (BS):   " + (totalShots > 0 ? bsStream.str() : "N/A")) | color(Color::YellowLight) | bold,
+        text("В ноги (LS):   " + (totalShots > 0 ? lsStream.str() : "N/A")) | color(Color::GrayLight) | bold,
+    });
 
     std::vector<ftxui::Element> matchElems;
     if (g_selectedPlayerInfo.recentMatches.empty()) {
-        matchElems.push_back(text(" Нет данных о последних матчах (сыграйте еще или подождите)") | color(Color::GrayDark) | center);
+        matchElems.push_back(text(" Нет данных о матчах") | color(Color::GrayDark));
     } else {
-        for (const auto& rm : g_selectedPlayerInfo.recentMatches) {
+        int maxVisible = 6;
+        int totalMatches = g_selectedPlayerInfo.recentMatches.size();
+        
+        // Ensure offset is valid
+        if (g_statsMatchOffset > std::max(0, totalMatches - maxVisible)) {
+            g_statsMatchOffset = std::max(0, totalMatches - maxVisible);
+        }
+
+        g_matchBoxes.clear();
+        g_matchBoxes.resize(std::min(maxVisible, totalMatches - g_statsMatchOffset));
+
+        for (int i = 0; i < g_matchBoxes.size(); ++i) {
+            int matchIdx = g_statsMatchOffset + i;
+            const auto& rm = g_selectedPlayerInfo.recentMatches[matchIdx];
+
             std::string agent = rm.characterId;
             std::string lowerId = rm.characterId;
             for(auto& c : lowerId) c = tolower(c);
@@ -98,23 +97,37 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
                 text(" K/D/A: " + kda + " ") | color(Color::White) | size(WIDTH, EQUAL, 20),
                 separator(),
                 text(" СЧЁТ: " + combatScore + " ") | color(Color::GrayLight)
-            }) | border;
+            }) | border | reflect(g_matchBoxes[i]);
+
+            if (g_matchBoxes[i].Contain(g_mouseX, g_mouseY)) {
+                row = row | inverted;
+            }
+
             matchElems.push_back(row);
+        }
+
+        if (totalMatches > maxVisible) {
+            std::string scrollInfo = " Показаны матчи " + std::to_string(g_statsMatchOffset + 1) + 
+                                     "-" + std::to_string(g_statsMatchOffset + g_matchBoxes.size()) + 
+                                     " из " + std::to_string(totalMatches) + " (Крути колесико или стрелки)";
+            matchElems.push_back(text(scrollInfo) | color(Color::GrayDark) | center);
         }
     }
     
-    auto matchHistoryBox = window(text(" Последние матчи ") | bold | color(Color::White), vbox(matchElems));
+    auto matchHistoryBox = window(text(" Последние матчи (Нажми для открытия в браузере) ") | bold | color(Color::White), vbox(matchElems));
 
     auto statsBox = window(text(" Подробная статистика игрока ") | bold | color(Color::Cyan),
         vbox(
             hbox(text(" Игрок: ") | bold, text(fullName) | color(Color::White)),
             separator(),
-            hbox(text(" Любимый Агент (за последние матчи): ") | bold, text(favAgent) | color(Color::YellowLight)),
-            hbox(text(" K/D (за последние матчи): ") | bold, text(g_selectedPlayerInfo.kdRatio < 0 ? "N/A" : kdStream.str()) | color(Color::GreenLight)),
+            hbox(text(" Любимый Агент: ") | bold, text(favAgent) | color(Color::YellowLight)),
+            hbox(text(" K/D: ") | bold, text(g_selectedPlayerInfo.kdRatio < 0 ? "N/A" : kdStream.str()) | color(Color::GreenLight)),
             separator(),
             hbox(
-                vbox(text(" Точность стрельбы:") | bold, bodyArt) | flex,
+                vbox(text(" Точность стрельбы:") | bold, bodyArt),
+                text("   "),
                 separator(),
+                text("   "),
                 matchHistoryBox | flex
             )
         )
