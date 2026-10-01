@@ -29,11 +29,24 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.0.2";
+const std::string CURRENT_VERSION = "v1.1.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
     float kdRatio = -1.0f;
+    int headshots = 0;
+    int bodyshots = 0;
+    int legshots = 0;
+    std::map<std::string, int> agentPlays;
+};
+
+struct MatchDetailsCacheEntry {
+    int kills;
+    int deaths;
+    int headshots;
+    int bodyshots;
+    int legshots;
+    std::string characterId;
 };
 struct RankCacheEntry {
     int tier;
@@ -45,12 +58,14 @@ static std::map<std::string, std::pair<std::string, std::string>> g_nameCache;
 static std::map<std::string, RankCacheEntry> g_rankCache;
 static std::map<std::string, PlayerStats> g_statsCache;
 static std::set<std::string> g_statsFetching;
-static std::map<std::string, std::map<std::string, std::pair<int, int>>> g_matchDetailsCache;
+static std::map<std::string, std::map<std::string, MatchDetailsCacheEntry>> g_matchDetailsCache;
 static std::string g_lastRenderedOutput;
 static std::string g_lastPhase;
 static std::string g_lastMatchId;
 static std::mutex g_mutex;
 static std::atomic<bool> g_running{true};
+
+// Globals are moved down below PlayerInfo
 
 // -----------------------------------------------------------------------------
 // UTF-8 Visual Character Length & Padding Helpers for Alignment
@@ -431,7 +446,19 @@ struct PlayerInfo {
     float kdRatio = -1.0f;
     int wins = -1;
     int losses = -1;
+    int headshots = 0;
+    int bodyshots = 0;
+    int legshots = 0;
+    std::map<std::string, int> agentPlays;
 };
+
+// Global view state
+enum class AppView { MAIN, PLAYER_STATS };
+static AppView g_currentView = AppView::MAIN;
+static std::string g_selectedPuuid = "";
+static PlayerInfo g_selectedPlayerInfo;
+static std::map<std::string, ftxui::Box> g_playerBoxes;
+static ftxui::Box g_myStatsBox;
 
 struct MatchState {
     std::string phase; // "coregame", "pregame", "none"
@@ -783,9 +810,12 @@ MatchState getLiveMatchState(const Session& session, const Lockfile& lock) {
 void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std::string> pdH) {
     if (!g_running) return;
 
-    // === K/D: from match list + match details ===
+    // === K/D + Advanced Stats: from match list + match details ===
     auto mlr = httpRequest("GET", sess.pdHost, 443, "/match/v1/matchlist/" + puuid, pdH, "", true, false);
-    int kills = 0, deaths = 0; bool kdOk = false;
+    int kills = 0, deaths = 0, hs = 0, bs = 0, ls = 0;
+    std::map<std::string, int> agentPlays;
+    bool kdOk = false;
+    
     if (mlr.statusCode == 200) {
         try {
             auto jm = json::parse(mlr.body);
@@ -800,8 +830,10 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                         std::lock_guard<std::mutex> lk(g_mutex);
                         if (g_matchDetailsCache.count(mid)) {
                             if (g_matchDetailsCache[mid].count(puuid)) {
-                                kills += g_matchDetailsCache[mid][puuid].first;
-                                deaths += g_matchDetailsCache[mid][puuid].second;
+                                auto& ms = g_matchDetailsCache[mid][puuid];
+                                kills += ms.kills; deaths += ms.deaths;
+                                hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
+                                if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
                                 kdOk = true; count++;
                             }
                             foundInCache = true;
@@ -812,26 +844,49 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                     auto mr = httpRequest("GET", sess.pdHost, 443, "/match/v1/matches/" + mid, pdH, "", true, false);
                     if (mr.statusCode == 200) {
                         auto md = json::parse(mr.body);
+                        std::map<std::string, MatchDetailsCacheEntry> matchStats;
+                        
                         if (md.contains("players") && md["players"].is_array()) {
-                            std::map<std::string, std::pair<int, int>> matchStats;
                             for (auto& p : md["players"]) {
                                 std::string subject = getJsonKeyStr(p, {"subject"});
+                                std::string characterId = getJsonKeyStr(p, {"characterId"});
+                                int pk = 0, pd = 0;
                                 if (p.contains("stats") && p["stats"].is_object()) {
-                                    int pk = 0, pd = 0;
                                     if (p["stats"].contains("kills") && p["stats"]["kills"].is_number()) pk = p["stats"]["kills"].get<int>();
                                     if (p["stats"].contains("deaths") && p["stats"]["deaths"].is_number()) pd = p["stats"]["deaths"].get<int>();
-                                    matchStats[subject] = {pk, pd};
+                                }
+                                matchStats[subject] = {pk, pd, 0, 0, 0, characterId};
+                            }
+                        }
+                        
+                        if (md.contains("roundResults") && md["roundResults"].is_array()) {
+                            for (auto& r : md["roundResults"]) {
+                                if (r.contains("playerStats") && r["playerStats"].is_array()) {
+                                    for (auto& ps : r["playerStats"]) {
+                                        std::string subject = getJsonKeyStr(ps, {"subject"});
+                                        if (ps.contains("damage") && ps["damage"].is_array()) {
+                                            for (auto& d : ps["damage"]) {
+                                                if (d.contains("headshots") && d["headshots"].is_number()) matchStats[subject].headshots += d["headshots"].get<int>();
+                                                if (d.contains("bodyshots") && d["bodyshots"].is_number()) matchStats[subject].bodyshots += d["bodyshots"].get<int>();
+                                                if (d.contains("legshots") && d["legshots"].is_number()) matchStats[subject].legshots += d["legshots"].get<int>();
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            {
-                                std::lock_guard<std::mutex> lk(g_mutex);
-                                g_matchDetailsCache[mid] = matchStats;
-                            }
-                            if (matchStats.count(puuid)) {
-                                kills += matchStats[puuid].first;
-                                deaths += matchStats[puuid].second;
-                                kdOk = true; count++;
-                            }
+                        }
+                        
+                        {
+                            std::lock_guard<std::mutex> lk(g_mutex);
+                            g_matchDetailsCache[mid] = matchStats;
+                        }
+                        
+                        if (matchStats.count(puuid)) {
+                            auto& ms = matchStats[puuid];
+                            kills += ms.kills; deaths += ms.deaths;
+                            hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
+                            if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
+                            kdOk = true; count++;
                         }
                     }
                 }
@@ -844,7 +899,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
     {
         std::lock_guard<std::mutex> lk(g_mutex);
         if (g_statsFetching.count(puuid)) {
-            g_statsCache[puuid] = {finalKd};
+            g_statsCache[puuid] = {finalKd, hs, bs, ls, agentPlays};
             g_statsFetching.erase(puuid);
         }
     }
@@ -1005,6 +1060,10 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
         std::lock_guard<std::mutex> lk(g_mutex);
         if (g_statsCache.count(p.puuid)) {
             p.kdRatio = g_statsCache[p.puuid].kdRatio;
+            p.headshots = g_statsCache[p.puuid].headshots;
+            p.bodyshots = g_statsCache[p.puuid].bodyshots;
+            p.legshots = g_statsCache[p.puuid].legshots;
+            p.agentPlays = g_statsCache[p.puuid].agentPlays;
         } else if (!g_statsFetching.count(p.puuid)) {
             g_statsFetching.insert(p.puuid);
             std::thread(fetchPlayerStats, session, p.puuid, pdHeaders).detach();
@@ -1014,12 +1073,13 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
 
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/component/component.hpp>
-#include "ftxui_render.hpp"
+#include "ftxui_stats_view.hpp"
 
 // -----------------------------------------------------------------------------
 // Main Loop
 // -----------------------------------------------------------------------------
 int main() {
+    SetConsoleOutputCP(CP_UTF8);
     std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
     checkAutoUpdate();
 
@@ -1064,6 +1124,16 @@ int main() {
                     matchState = MatchState();
                 }
                 
+                // Keep selectedPlayerInfo updated if we are viewing it
+                if (g_currentView == AppView::PLAYER_STATS && !g_selectedPuuid.empty()) {
+                    for (const auto& p : matchState.players) {
+                        if (p.puuid == g_selectedPuuid) {
+                            g_selectedPlayerInfo = p;
+                            break;
+                        }
+                    }
+                }
+                
                 screen.PostEvent(ftxui::Event::Custom);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -1072,15 +1142,61 @@ int main() {
 
     // FTXUI Component
     auto renderer = ftxui::Renderer([&] {
+        if (g_currentView == AppView::PLAYER_STATS) {
+            return renderPlayerStats(agentMap);
+        }
         return renderFTXUI(matchState, session, lock, agentMap, mapNameMap);
     });
 
-    // Catch 'q' to quit
+    // Catch events for clicks and quitting
     renderer = ftxui::CatchEvent(renderer, [&](ftxui::Event event) {
-        if (event == ftxui::Event::Character('q') || event == ftxui::Event::Character('Q') || event == ftxui::Event::Escape) {
+        if (event == ftxui::Event::Character('q') || event == ftxui::Event::Character('Q')) {
             g_running = false;
             screen.ExitLoopClosure()();
             return true;
+        }
+        
+        if (event == ftxui::Event::Escape) {
+            if (g_currentView == AppView::PLAYER_STATS) {
+                g_currentView = AppView::MAIN;
+                return true;
+            } else {
+                g_running = false;
+                screen.ExitLoopClosure()();
+                return true;
+            }
+        }
+        
+        if (event.is_mouse() && event.mouse().button == ftxui::Mouse::Left && event.mouse().motion == ftxui::Mouse::Released) {
+            if (g_currentView == AppView::MAIN) {
+                // Check "My Stats" button
+                if (g_myStatsBox.Contain(event.mouse().x, event.mouse().y) && !session.puuid.empty()) {
+                    g_selectedPuuid = session.puuid;
+                    for (const auto& p : matchState.players) {
+                        if (p.puuid == g_selectedPuuid) {
+                            g_selectedPlayerInfo = p;
+                            break;
+                        }
+                    }
+                    g_currentView = AppView::PLAYER_STATS;
+                    return true;
+                }
+                
+                // Check Player Names
+                for (const auto& [puuid, box] : g_playerBoxes) {
+                    if (box.Contain(event.mouse().x, event.mouse().y)) {
+                        g_selectedPuuid = puuid;
+                        for (const auto& p : matchState.players) {
+                            if (p.puuid == puuid) {
+                                g_selectedPlayerInfo = p;
+                                break;
+                            }
+                        }
+                        g_currentView = AppView::PLAYER_STATS;
+                        return true;
+                    }
+                }
+            }
         }
         return false;
     });

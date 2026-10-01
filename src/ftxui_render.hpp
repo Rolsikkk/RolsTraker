@@ -12,6 +12,12 @@
 
 using namespace ftxui;
 
+extern AppView g_currentView;
+extern std::string g_selectedPuuid;
+extern PlayerInfo g_selectedPlayerInfo;
+extern std::map<std::string, ftxui::Box> g_playerBoxes;
+extern ftxui::Box g_myStatsBox;
+
 // FTXUI colors for parties
 const std::vector<Color> FTX_PARTY_COLORS = {
     Color::Green,
@@ -89,7 +95,7 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
 
         rows.push_back({
             partyIcon,
-            ftxui::text(" " + fullName + " "),
+            ftxui::text(" " + fullName + " ") | ftxui::reflect(g_playerBoxes[p.puuid]),
             ftxui::text(" " + agent + " "),
             ftxui::text(" " + rankStr + " ") | ftxui::color(rColor),
             ftxui::text(" " + kdStr + " "),
@@ -206,6 +212,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             t2 | ftxui::flex
         }),
         ftxui::separator(),
-        ftxui::vbox(summaryItems)
+        ftxui::hbox({
+            ftxui::vbox(summaryItems) | ftxui::flex,
+            ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::reflect(g_myStatsBox)
+        })
     }) | ftxui::border;
 }
