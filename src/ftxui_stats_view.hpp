@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "ftxui_render.hpp"
+#include "ftxui_image.hpp"
 
 inline std::string padCenter(const std::string& str, size_t width) {
     if (str.length() >= width) return str;
@@ -54,25 +55,17 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     lsStream << std::fixed << std::setprecision(1) << lsPct << "%";
     kdStream << std::fixed << std::setprecision(2) << g_selectedPlayerInfo.kdRatio;
 
-    auto bodyArt = vbox({
-        hbox(text("         _.-'^^'-._         ") | color(Color::GrayDark)),
-        hbox(text("        /          \\        ") | color(Color::GrayDark)),
-        hbox(text("       |   "), text(padCenter(totalShots > 0 ? hsStream.str() : "N/A", 6)) | color(Color::RedLight) | bold, text("   |        ") | color(Color::GrayDark)),
-        hbox(text("        \\          /        ") | color(Color::GrayDark)),
-        hbox(text("         '-.,__,.-'         ") | color(Color::GrayDark)),
-        hbox(text("           |    |           ") | color(Color::GrayDark)),
-        hbox(text("         .-'    '-.         ") | color(Color::GrayDark)),
-        hbox(text("        /          \\        ") | color(Color::GrayDark)),
-        hbox(text("       |   "), text(padCenter(totalShots > 0 ? bsStream.str() : "N/A", 6)) | color(Color::YellowLight) | bold, text("   |        ") | color(Color::GrayDark)),
-        hbox(text("       |            |       ") | color(Color::GrayDark)),
-        hbox(text("       |            |       ") | color(Color::GrayDark)),
-        hbox(text("        \\          /        ") | color(Color::GrayDark)),
-        hbox(text("         '-.,,,.-'          ") | color(Color::GrayDark)),
-        hbox(text("           |    |           ") | color(Color::GrayDark)),
-        hbox(text("           |    |           ") | color(Color::GrayDark)),
-        hbox(text("          /      \\          ") | color(Color::GrayDark)),
-        hbox(text("         |  "), text(padCenter(totalShots > 0 ? lsStream.str() : "N/A", 6)) | color(Color::GrayLight) | bold, text("  |         ") | color(Color::GrayDark)),
-        hbox(text("         '--'  '--'         ") | color(Color::GrayDark))
+    auto jettImage = renderImage("assets/jett.jpg", 18, 18);
+    auto bodyArt = hbox({
+        jettImage,
+        text("  "),
+        vbox({
+            filler(),
+            text("В голову (HS): " + (totalShots > 0 ? hsStream.str() : "N/A")) | color(Color::RedLight) | bold,
+            text("В тело (BS):   " + (totalShots > 0 ? bsStream.str() : "N/A")) | color(Color::YellowLight) | bold,
+            text("В ноги (LS):   " + (totalShots > 0 ? lsStream.str() : "N/A")) | color(Color::GrayLight) | bold,
+            filler()
+        })
     }) | center;
 
     std::vector<ftxui::Element> matchElems;

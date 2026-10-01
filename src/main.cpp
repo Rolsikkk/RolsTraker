@@ -29,7 +29,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.5";
+const std::string CURRENT_VERSION = "v1.1.6";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -83,6 +83,10 @@ static std::mutex g_mutex;
 static std::atomic<bool> g_running{true};
 
 // Globals are moved down below PlayerInfo
+
+void ClearConsole() {
+    std::cout << "\x1b[2J\x1b[H";
+}
 
 // -----------------------------------------------------------------------------
 // UTF-8 Visual Character Length & Padding Helpers for Alignment
@@ -1136,12 +1140,7 @@ int main() {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
 
-    HWND console = GetConsoleWindow();
-    if (console) {
-        RECT r;
-        GetWindowRect(console, &r);
-        MoveWindow(console, r.left, r.top, 1200, 700, TRUE);
-    }
+    // Windows Console is no longer forcefully resized to respect user's default.
 
     std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
     checkAutoUpdate();
