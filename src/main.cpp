@@ -29,7 +29,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.7";
+const std::string CURRENT_VERSION = "v1.1.9";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -405,8 +405,14 @@ void checkAutoUpdate() {
                     if (updater.is_open()) {
                         updater << "@echo off\n";
                         updater << "timeout /t 1 /nobreak > nul\n";
-                        updater << "copy /y RolsTraker_new.exe RolsTraker.exe > nul\n";
-                        updater << "del /f /q RolsTraker_new.exe > nul\n";
+                        updater << ":retry\n";
+                        updater << "move /y RolsTraker.exe RolsTraker_old.exe > nul 2>&1\n";
+                        updater << "copy /y RolsTraker_new.exe RolsTraker.exe > nul 2>&1\n";
+                        updater << "if not exist RolsTraker.exe (\n";
+                        updater << "    timeout /t 1 /nobreak > nul\n";
+                        updater << "    goto retry\n";
+                        updater << ")\n";
+                        updater << "del /f /q RolsTraker_new.exe > nul 2>&1\n";
                         updater << "start RolsTraker.exe\n";
                         updater << "del \"%~f0\"\n";
                         updater.close();
