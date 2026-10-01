@@ -30,7 +30,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.12";
+const std::string CURRENT_VERSION = "v1.1.13";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -1297,10 +1297,11 @@ int main() {
                         }
                     }
                 }
-                
-                screen.PostEvent(ftxui::Event::Custom);
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            
+            // Post event for UI animations
+            screen.PostEvent(ftxui::Event::Custom);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     });
 
@@ -1350,10 +1351,50 @@ int main() {
                 // Check "My Stats" button
                 if (g_myStatsBox.Contain(event.mouse().x, event.mouse().y) && !session.puuid.empty()) {
                     g_selectedPuuid = session.puuid;
+                    bool found = false;
                     for (const auto& p : matchState.players) {
                         if (p.puuid == g_selectedPuuid) {
                             g_selectedPlayerInfo = p;
+                            found = true;
                             break;
+                        }
+                    }
+                    if (!found) {
+                        g_selectedPlayerInfo = PlayerInfo();
+                        g_selectedPlayerInfo.puuid = session.puuid;
+                        g_selectedPlayerInfo.gameName = "Вы";
+                        if (g_nameCache.count(session.puuid)) {
+                            g_selectedPlayerInfo.gameName = g_nameCache[session.puuid].first;
+                            g_selectedPlayerInfo.tagLine = g_nameCache[session.puuid].second;
+                        }
+                        if (g_rankCache.count(session.puuid)) {
+                            g_selectedPlayerInfo.rankTier = g_rankCache[session.puuid].tier;
+                            g_selectedPlayerInfo.rankRR = g_rankCache[session.puuid].rr;
+                            g_selectedPlayerInfo.peakRankTier = g_rankCache[session.puuid].peakTier;
+                        }
+                        
+                        // Manually trigger stats fetch if missing
+                        if (!g_statsCache.count(session.puuid) && !g_statsFetching.count(session.puuid)) {
+                            g_selectedPlayerInfo.isLoading = true;
+                            g_statsFetching.insert(session.puuid);
+                            std::map<std::string, std::string> pdHeaders = {
+                                {"Authorization", "Bearer " + session.accessToken},
+                                {"X-Riot-Entitlements-JWT", session.token},
+                                {"X-Riot-ClientPlatform", getClientPlatformBase64()},
+                                {"X-Riot-ClientVersion", session.clientVersion}
+                            };
+                            std::thread(fetchPlayerStats, session, session.puuid, pdHeaders).detach();
+                        } else if (g_statsCache.count(session.puuid)) {
+                            g_selectedPlayerInfo.kdRatio = g_statsCache[session.puuid].kdRatio;
+                            g_selectedPlayerInfo.headshots = g_statsCache[session.puuid].headshots;
+                            g_selectedPlayerInfo.bodyshots = g_statsCache[session.puuid].bodyshots;
+                            g_selectedPlayerInfo.legshots = g_statsCache[session.puuid].legshots;
+                            g_selectedPlayerInfo.totalScore = g_statsCache[session.puuid].totalScore;
+                            g_selectedPlayerInfo.totalRounds = g_statsCache[session.puuid].totalRounds;
+                            g_selectedPlayerInfo.matchesWon = g_statsCache[session.puuid].matchesWon;
+                            g_selectedPlayerInfo.matchesPlayed = g_statsCache[session.puuid].matchesPlayed;
+                            g_selectedPlayerInfo.agentPlays = g_statsCache[session.puuid].agentPlays;
+                            g_selectedPlayerInfo.recentMatches = g_statsCache[session.puuid].recentMatches;
                         }
                     }
                     g_currentView = AppView::PLAYER_STATS;

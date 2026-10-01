@@ -9,6 +9,7 @@
 #include <string>
 #include <iomanip>
 #include <sstream>
+#include <chrono>
 
 using namespace ftxui;
 
@@ -132,12 +133,27 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     } 
     
     if (state.phase == "none") {
+        static auto start_time = std::chrono::steady_clock::now();
+        int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count() / 100;
+        
+        auto myStatsBtn = ftxui::text(" пока что вы можете увидеть свою статистику ") 
+                        | ftxui::bold | ftxui::color(ftxui::Color::CyanLight)
+                        | ftxui::reflect(g_myStatsBox);
+                        
+        if (g_myStatsBox.Contain(g_mouseX, g_mouseY)) {
+            myStatsBtn = myStatsBtn | ftxui::inverted;
+        }
+
         return ftxui::vbox({
-            ftxui::text("ROLSTRAKER (" + CURRENT_VERSION + ")") | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
-            ftxui::separator(),
-            ftxui::text("Riot Client подключен (Порт: " + std::to_string(lock.port) + "). Ожидание матча / выбора агента...") | ftxui::color(ftxui::Color::YellowLight) | ftxui::center,
-            ftxui::text("Region: " + session.region + " | Shard: " + session.shard) | ftxui::color(ftxui::Color::GrayDark) | ftxui::center
-        }) | ftxui::border | ftxui::center;
+            ftxui::filler(),
+            ftxui::hbox({
+                ftxui::spinner(21, frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan),
+                ftxui::text(" ROLSTRAKER") | ftxui::bold | ftxui::color(ftxui::Color::White)
+            }) | ftxui::center,
+            ftxui::text(" зайдите в матч чтобы увидеть информацию ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
+            myStatsBtn | ftxui::center,
+            ftxui::filler()
+        }) | ftxui::center;
     }
 
     // Party counts & Group Assignment
