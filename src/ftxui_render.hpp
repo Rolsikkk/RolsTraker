@@ -122,14 +122,23 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
     });
 }
 
+// Custom Google-style circle spinner: ◐ ◓ ◑ ◒
+inline ftxui::Element circleSpinner(int frame) {
+    static const std::vector<std::string> frames = {
+        "◐", "◓", "◑", "◒"
+    };
+    int idx = (frame / 2) % (int)frames.size();
+    return ftxui::text(frames[idx]);
+}
+
 inline ftxui::Element renderFTXUI(const MatchState& state, const Session& session, const Lockfile& lock, const std::map<std::string, std::string>& agentMap, const std::map<std::string, std::string>& mapNameMap) {
     if (lock.port == 0) {
-        static auto start_time = std::chrono::steady_clock::now();
-        int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count() / 100;
+        static auto start_time_offline = std::chrono::steady_clock::now();
+        int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_offline).count() / 100;
         
         return ftxui::vbox({
             ftxui::filler(),
-            ftxui::spinner(9, frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
+            circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
             ftxui::filler(),
             ftxui::text(" Riot Client не запущен! Ожидание запуска игры... ") | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
             ftxui::text(" Автоматическая проверка каждые 3 секунды... ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center
@@ -137,8 +146,8 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     } 
     
     if (state.phase == "none") {
-        static auto start_time = std::chrono::steady_clock::now();
-        int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count() / 100;
+        static auto start_time_idle = std::chrono::steady_clock::now();
+        int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_idle).count() / 100;
         
         auto myStatsBtn = ftxui::text(" пока что вы можете увидеть свою статистику ") 
                         | ftxui::bold | ftxui::color(ftxui::Color::CyanLight)
@@ -150,7 +159,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
         return ftxui::vbox({
             ftxui::filler(),
-            ftxui::spinner(9, frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
+            circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
             ftxui::filler(),
             ftxui::text(" зайдите в матч чтобы увидеть информацию ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
             myStatsBtn | ftxui::center
