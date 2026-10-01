@@ -30,7 +30,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.13";
+const std::string CURRENT_VERSION = "v1.1.14";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -392,7 +392,7 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
 // Auto-Updater Module
 // -----------------------------------------------------------------------------
 void checkAutoUpdate() {
-    std::cout << "Проверка обновлений на GitHub (" << GITHUB_REPO << ")...\n";
+    // std::cout << "Проверка обновлений на GitHub (" << GITHUB_REPO << ")...\n";
 
     std::map<std::string, std::string> headers = {
         {"User-Agent", "RolsTraker-App"},
@@ -420,11 +420,11 @@ void checkAutoUpdate() {
                     downloadUrl = "https://github.com/" + GITHUB_REPO + "/releases/download/" + latestTag + "/RolsTraker.exe";
                 }
 
-                std::cout << "\n [!] Найдено обновление! (Текущая: " << CURRENT_VERSION << ", Новая: " << latestTag << ")\n";
-                std::cout << " Скачивание обновленного файла RolsTraker.exe...\n";
+                // std::cout << "\n [!] Найдено обновление! (Текущая: " << CURRENT_VERSION << ", Новая: " << latestTag << ")\n";
+                // std::cout << " Скачивание обновленного файла RolsTraker.exe...\n";
 
                 if (downloadFileWithRedirects(downloadUrl, "RolsTraker_new.exe")) {
-                    std::cout << " Обновление успешно скачано! Перезапуск программы...\n";
+                    // std::cout << " Обновление успешно скачано! Перезапуск программы...\n";
 
                     std::ofstream updater("updater.bat");
                     if (updater.is_open()) {
@@ -445,15 +445,9 @@ void checkAutoUpdate() {
 
                     WinExec("cmd /c updater.bat", SW_HIDE);
                     exit(0);
-                } else {
-                    std::cout << " Ошибка при скачивании файла обновления.\n";
                 }
-            } else {
-                std::cout << " У вас установлена актуальная версия (" << CURRENT_VERSION << ").\n";
             }
         } catch (...) {}
-    } else {
-        std::cout << " [!] Не удалось проверить обновления (Код: " << res.statusCode << "). Возможно, исчерпан лимит GitHub API.\n";
     }
 }
 
@@ -1244,14 +1238,14 @@ int main() {
         MoveWindow(console, r.left, r.top, 1000, 600, TRUE);
     }
 
-    std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
+    // std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
     checkAutoUpdate();
 
-    std::cout << "Загрузка метаданных агентов и карт Valorant...\n";
+    // std::cout << "Загрузка метаданных агентов и карт Valorant...\n";
     auto agentMap = getAgentMap();
     auto mapNameMap = getMapNameMap();
 
-    std::cout << "Метаданные успешно загружены!\n";
+    // std::cout << "Метаданные успешно загружены!\n";
 
     Lockfile lock;
     Session session;
