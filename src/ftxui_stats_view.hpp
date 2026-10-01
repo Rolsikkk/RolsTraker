@@ -203,9 +203,9 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     int acs = g_selectedPlayerInfo.totalRounds > 0 ? g_selectedPlayerInfo.totalScore / g_selectedPlayerInfo.totalRounds : 0;
     std::string acsStr = g_selectedPlayerInfo.isLoading ? loadingStr : (g_selectedPlayerInfo.totalRounds > 0 ? std::to_string(acs) : "N/A");
 
-    auto matchHistoryBox = window(text(" Последние 20 матчей (Все режимы. Нажми для таблицы) ") | bold | color(Color::White), vbox(matchElems));
+    auto matchHistoryBox = window(text(" Последние рейтинговые матчи (Нажми для таблицы) ") | bold | color(Color::White), vbox(matchElems));
 
-    auto statsBox = window(text(" Подробная статистика (Исключая Deathmatch/Кастомки) ") | bold | color(Color::Cyan),
+    auto statsBox = window(text(" Подробная статистика (Только Рейтинг) ") | bold | color(Color::Cyan),
         vbox(
             hbox(text(" Игрок: ") | bold, text(fullName) | color(Color::White)),
             separator(),
@@ -217,7 +217,13 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
                     hbox(text(" ACS: ") | bold, text(acsStr) | color(Color::RedLight))
                 ),
                 separator(),
-                vbox(text(" Точность стрельбы:") | bold, bodyArt)
+                vbox(text(" Точность стрельбы:") | bold, bodyArt),
+                separator(),
+                vbox(
+                    text(" Ранги:") | bold,
+                    hbox(text("Текущий: ") | color(Color::GrayLight), text(formatRank(g_selectedPlayerInfo.rankTier, g_selectedPlayerInfo.rankRR).name) | color(getRankColorFTX(g_selectedPlayerInfo.rankTier))),
+                    hbox(text("Макс:    ") | color(Color::GrayLight), text(formatRank(g_selectedPlayerInfo.peakRankTier, 0).name) | color(getRankColorFTX(g_selectedPlayerInfo.peakRankTier)))
+                )
             ),
             separator(),
             matchHistoryBox

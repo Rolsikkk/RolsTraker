@@ -30,7 +30,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.11";
+const std::string CURRENT_VERSION = "v1.1.12";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -95,6 +95,7 @@ struct RankCacheEntry {
     int rr;
     int wins;
     int losses;
+    int peakTier;
 };
 static std::map<std::string, std::pair<std::string, std::string>> g_nameCache;
 static std::map<std::string, RankCacheEntry> g_rankCache;
@@ -489,6 +490,7 @@ struct PlayerInfo {
     std::string agentName;
     int rankTier = 0;
     int rankRR = 0;
+    int peakRankTier = 0;
     float kdRatio = -1.0f;
     int wins = -1;
     int losses = -1;
@@ -875,7 +877,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
     if (!g_running) return;
 
     // === K/D + Advanced Stats: from match list + match details ===
-    auto mlr = httpRequest("GET", sess.pdHost, 443, "/match-history/v1/history/" + puuid + "?startIndex=0&endIndex=20", pdH, "", true, false);
+    auto mlr = httpRequest("GET", sess.pdHost, 443, "/match-history/v1/history/" + puuid + "?queue=competitive&startIndex=0&endIndex=20", pdH, "", true, false);
     int kills = 0, deaths = 0, hs = 0, bs = 0, ls = 0;
     int totalScore = 0, totalRounds = 0, matchesWon = 0, matchesPlayed = 0;
     std::map<std::string, int> agentPlays;
@@ -1095,6 +1097,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
             p.rankRR = g_rankCache[p.puuid].rr;
             p.wins = g_rankCache[p.puuid].wins;
             p.losses = g_rankCache[p.puuid].losses;
+            p.peakRankTier = g_rankCache[p.puuid].peakTier;
             continue;
         }
 
@@ -1104,6 +1107,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
             int rr = 0;
             int totalWins = 0;
             int totalGames = 0;
+            int peakTier = 0;
             try {
                 auto j = json::parse(mmrRes.body);
 
@@ -1156,7 +1160,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                             }
                         }
                         
-                        // Parse all-time W/L
+                        // Parse all-time W/L and peak rank
                         for (const auto& [sId, sData] : seasons.items()) {
                             if (sData.contains("NumberOfGames") && sData["NumberOfGames"].is_number()) {
                                 totalGames += sData["NumberOfGames"].get<int>();
@@ -1164,16 +1168,21 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                             if (sData.contains("NumberOfWinsWithPlacements") && sData["NumberOfWinsWithPlacements"].is_number()) {
                                 totalWins += sData["NumberOfWinsWithPlacements"].get<int>();
                             }
+                            if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
+                                int t = sData["CompetitiveTier"].get<int>();
+                                if (t > peakTier) peakTier = t;
+                            }
                         }
                     }
                 }
             } catch (...) {}
 
-            g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins};
+            g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins, peakTier};
             p.rankTier = tier;
             p.rankRR = rr;
             p.wins = totalWins;
             p.losses = totalGames - totalWins;
+            p.peakRankTier = peakTier;
         }
     }
 
