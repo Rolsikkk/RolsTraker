@@ -30,7 +30,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.15";
+const std::string CURRENT_VERSION = "v2.0.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -102,18 +102,10 @@ static std::map<std::string, RankCacheEntry> g_rankCache;
 static std::map<std::string, PlayerStats> g_statsCache;
 static std::set<std::string> g_statsFetching;
 static std::map<std::string, std::map<std::string, MatchDetailsCacheEntry>> g_matchDetailsCache;
-static std::string g_lastRenderedOutput;
-static std::string g_lastPhase;
-static std::string g_lastMatchId;
 static std::mutex g_mutex;
 static std::atomic<bool> g_running{true};
 static std::string g_updateStatus; // "" = idle, "checking" = checking, "downloading" = downloading, "done" = restarting
-
-// Globals are moved down below PlayerInfo
-
-void ClearConsole() {
-    std::cout << "\x1b[2J\x1b[H";
-}
+static std::mutex g_updateMutex;
 
 // -----------------------------------------------------------------------------
 // UTF-8 Visual Character Length & Padding Helpers for Alignment
@@ -393,7 +385,7 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
 // Auto-Updater Module (runs in background thread)
 // -----------------------------------------------------------------------------
 void checkAutoUpdate() {
-    g_updateStatus = "checking";
+    { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "checking"; }
 
     std::map<std::string, std::string> headers = {
         {"User-Agent", "RolsTraker-App"},
@@ -402,7 +394,7 @@ void checkAutoUpdate() {
 
     auto res = httpRequest("GET", "api.github.com", 443, "/repos/" + GITHUB_REPO + "/releases/latest", headers, "", true, false);
     if (res.statusCode != 200) {
-        g_updateStatus = "";
+        { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = ""; }
         return;
     }
 
@@ -410,7 +402,7 @@ void checkAutoUpdate() {
         auto j = json::parse(res.body);
         std::string latestTag = getJsonKeyStr(j, {"tag_name"});
         if (latestTag.empty() || latestTag == CURRENT_VERSION) {
-            g_updateStatus = "";
+            { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = ""; }
             return;
         }
 
@@ -428,10 +420,10 @@ void checkAutoUpdate() {
             downloadUrl = "https://github.com/" + GITHUB_REPO + "/releases/download/" + latestTag + "/RolsTraker.exe";
         }
 
-        g_updateStatus = "downloading:" + latestTag;
+        { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "downloading:" + latestTag; }
 
         if (downloadFileWithRedirects(downloadUrl, "RolsTraker_new.exe")) {
-            g_updateStatus = "restarting";
+            { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "restarting"; }
 
             std::ofstream updater("updater.bat");
             if (updater.is_open()) {
@@ -456,10 +448,10 @@ void checkAutoUpdate() {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             exit(0);
         } else {
-            g_updateStatus = ""; // Download failed, continue normally
+            { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = ""; } // Download failed, continue normally
         }
     } catch (...) {
-        g_updateStatus = "";
+        { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = ""; }
     }
 }
 
@@ -972,7 +964,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                                 bool won = teamWon.count(teamId) ? teamWon[teamId] : false;
                                 int rWon = teamRoundsWon.count(teamId) ? teamRoundsWon[teamId] : 0;
                                 int rLost = teamRoundsLost.count(teamId) ? teamRoundsLost[teamId] : 0;
-                                matchStats[subject] = {queueId, pk, pd, hs, bs, ls, characterId, pa, pscore, rWon, rLost, won};
+                                matchStats[subject] = {queueId, pk, pd, 0, 0, 0, characterId, pa, pscore, rWon, rLost, won};
                                 
                                 sb.players.push_back({subject, characterId, teamId, pk, pd, pa, pscore});
                             }
@@ -1040,19 +1032,21 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
 
     // Apply cached names and ranks first
     std::vector<std::string> uncachedNamesPuuids;
-    for (auto& p : players) {
-        if (g_nameCache.count(p.puuid)) {
-            p.gameName = g_nameCache[p.puuid].first;
-            p.tagLine = g_nameCache[p.puuid].second;
-        } else {
-            uncachedNamesPuuids.push_back(p.puuid);
-        }
-
-        if (g_rankCache.count(p.puuid)) {
-            p.rankTier = g_rankCache[p.puuid].tier;
-            p.rankRR = g_rankCache[p.puuid].rr;
-            p.wins = g_rankCache[p.puuid].wins;
-            p.losses = g_rankCache[p.puuid].losses;
+    {
+        std::lock_guard<std::mutex> lk(g_mutex);
+        for (auto& p : players) {
+            if (g_nameCache.count(p.puuid)) {
+                p.gameName = g_nameCache[p.puuid].first;
+                p.tagLine = g_nameCache[p.puuid].second;
+            } else {
+                uncachedNamesPuuids.push_back(p.puuid);
+            }
+            if (g_rankCache.count(p.puuid)) {
+                p.rankTier = g_rankCache[p.puuid].tier;
+                p.rankRR = g_rankCache[p.puuid].rr;
+                p.wins = g_rankCache[p.puuid].wins;
+                p.losses = g_rankCache[p.puuid].losses;
+            }
         }
     }
 
@@ -1469,6 +1463,6 @@ int main() {
         polling_thread.join();
     }
     
-    std::cout << "\nЗавершение работы RolsTraker...\n";
+    if (g_hSession) { WinHttpCloseHandle(g_hSession); g_hSession = nullptr; }
     return 0;
 }

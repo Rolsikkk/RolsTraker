@@ -21,6 +21,7 @@ extern ftxui::Box g_myStatsBox;
 extern int g_mouseX;
 extern int g_mouseY;
 extern std::string g_updateStatus;
+extern std::mutex g_updateMutex;
 
 // FTXUI colors for parties
 const std::vector<Color> FTX_PARTY_COLORS = {
@@ -136,6 +137,10 @@ inline ftxui::Element circleSpinner(int frame) {
 }
 
 inline ftxui::Element renderFTXUI(const MatchState& state, const Session& session, const Lockfile& lock, const std::map<std::string, std::string>& agentMap, const std::map<std::string, std::string>& mapNameMap) {
+    // Capture update status once under the mutex to avoid races
+    std::string updateStatus;
+    { std::lock_guard<std::mutex> lk(g_updateMutex); updateStatus = g_updateStatus; }
+
     if (lock.port == 0) {
         static auto start_time_offline = std::chrono::steady_clock::now();
         int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_offline).count() / 100;
@@ -143,13 +148,13 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         // Update status text
         std::string updateText = "";
         Color updateColor = Color::GrayDark;
-        if (g_updateStatus == "checking") {
+        if (updateStatus == "checking") {
             updateText = " Проверка обновлений... ";
-        } else if (g_updateStatus.substr(0, 11) == "downloading") {
-            std::string ver = g_updateStatus.size() > 12 ? g_updateStatus.substr(12) : "";
+        } else if (updateStatus.size() >= 11 && updateStatus.substr(0, 11) == "downloading") {
+            std::string ver = updateStatus.size() > 12 ? updateStatus.substr(12) : "";
             updateText = " Скачивание обновления " + ver + "... ";
             updateColor = Color::YellowLight;
-        } else if (g_updateStatus == "restarting") {
+        } else if (updateStatus == "restarting") {
             updateText = " Перезапуск... ";
             updateColor = Color::GreenLight;
         }
@@ -174,13 +179,13 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         // Update status text
         std::string updateText = "";
         Color updateColor = Color::GrayDark;
-        if (g_updateStatus == "checking") {
+        if (updateStatus == "checking") {
             updateText = " Проверка обновлений... ";
-        } else if (g_updateStatus.size() > 11 && g_updateStatus.substr(0, 11) == "downloading") {
-            std::string ver = g_updateStatus.size() > 12 ? g_updateStatus.substr(12) : "";
+        } else if (updateStatus.size() >= 11 && updateStatus.substr(0, 11) == "downloading") {
+            std::string ver = updateStatus.size() > 12 ? updateStatus.substr(12) : "";
             updateText = " Скачивание обновления " + ver + "... ";
             updateColor = Color::YellowLight;
-        } else if (g_updateStatus == "restarting") {
+        } else if (updateStatus == "restarting") {
             updateText = " Перезапуск... ";
             updateColor = Color::GreenLight;
         }
