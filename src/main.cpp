@@ -107,6 +107,7 @@ static std::string g_lastPhase;
 static std::string g_lastMatchId;
 static std::mutex g_mutex;
 static std::atomic<bool> g_running{true};
+static std::string g_updateStatus; // "" = idle, "checking" = checking, "downloading" = downloading, "done" = restarting
 
 // Globals are moved down below PlayerInfo
 
@@ -389,10 +390,10 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
 }
 
 // -----------------------------------------------------------------------------
-// Auto-Updater Module
+// Auto-Updater Module (runs in background thread)
 // -----------------------------------------------------------------------------
 void checkAutoUpdate() {
-    // std::cout << "Проверка обновлений на GitHub (" << GITHUB_REPO << ")...\n";
+    g_updateStatus = "checking";
 
     std::map<std::string, std::string> headers = {
         {"User-Agent", "RolsTraker-App"},
@@ -400,54 +401,65 @@ void checkAutoUpdate() {
     };
 
     auto res = httpRequest("GET", "api.github.com", 443, "/repos/" + GITHUB_REPO + "/releases/latest", headers, "", true, false);
-    if (res.statusCode == 200) {
-        try {
-            auto j = json::parse(res.body);
-            std::string latestTag = getJsonKeyStr(j, {"tag_name"});
-            if (!latestTag.empty() && latestTag != CURRENT_VERSION) {
-                std::string downloadUrl;
-                if (j.contains("assets") && j["assets"].is_array()) {
-                    for (const auto& asset : j["assets"]) {
-                        std::string name = getJsonKeyStr(asset, {"name"});
-                        if (name == "RolsTraker.exe") {
-                            downloadUrl = getJsonKeyStr(asset, {"browser_download_url"});
-                            break;
-                        }
-                    }
-                }
+    if (res.statusCode != 200) {
+        g_updateStatus = "";
+        return;
+    }
 
-                if (downloadUrl.empty() && !latestTag.empty()) {
-                    downloadUrl = "https://github.com/" + GITHUB_REPO + "/releases/download/" + latestTag + "/RolsTraker.exe";
-                }
+    try {
+        auto j = json::parse(res.body);
+        std::string latestTag = getJsonKeyStr(j, {"tag_name"});
+        if (latestTag.empty() || latestTag == CURRENT_VERSION) {
+            g_updateStatus = "";
+            return;
+        }
 
-                // std::cout << "\n [!] Найдено обновление! (Текущая: " << CURRENT_VERSION << ", Новая: " << latestTag << ")\n";
-                // std::cout << " Скачивание обновленного файла RolsTraker.exe...\n";
-
-                if (downloadFileWithRedirects(downloadUrl, "RolsTraker_new.exe")) {
-                    // std::cout << " Обновление успешно скачано! Перезапуск программы...\n";
-
-                    std::ofstream updater("updater.bat");
-                    if (updater.is_open()) {
-                        updater << "@echo off\n";
-                        updater << "timeout /t 1 /nobreak > nul\n";
-                        updater << ":retry\n";
-                        updater << "move /y RolsTraker.exe RolsTraker_old.exe > nul 2>&1\n";
-                        updater << "copy /y RolsTraker_new.exe RolsTraker.exe > nul 2>&1\n";
-                        updater << "if not exist RolsTraker.exe (\n";
-                        updater << "    timeout /t 1 /nobreak > nul\n";
-                        updater << "    goto retry\n";
-                        updater << ")\n";
-                        updater << "del /f /q RolsTraker_new.exe > nul 2>&1\n";
-                        updater << "start RolsTraker.exe\n";
-                        updater << "del \"%~f0\"\n";
-                        updater.close();
-                    }
-
-                    WinExec("cmd /c updater.bat", SW_HIDE);
-                    exit(0);
+        // Found a new version
+        std::string downloadUrl;
+        if (j.contains("assets") && j["assets"].is_array()) {
+            for (const auto& asset : j["assets"]) {
+                if (getJsonKeyStr(asset, {"name"}) == "RolsTraker.exe") {
+                    downloadUrl = getJsonKeyStr(asset, {"browser_download_url"});
+                    break;
                 }
             }
-        } catch (...) {}
+        }
+        if (downloadUrl.empty()) {
+            downloadUrl = "https://github.com/" + GITHUB_REPO + "/releases/download/" + latestTag + "/RolsTraker.exe";
+        }
+
+        g_updateStatus = "downloading:" + latestTag;
+
+        if (downloadFileWithRedirects(downloadUrl, "RolsTraker_new.exe")) {
+            g_updateStatus = "restarting";
+
+            std::ofstream updater("updater.bat");
+            if (updater.is_open()) {
+                updater << "@echo off\n";
+                updater << "timeout /t 1 /nobreak > nul\n";
+                updater << ":retry\n";
+                updater << "move /y RolsTraker.exe RolsTraker_old.exe > nul 2>&1\n";
+                updater << "copy /y RolsTraker_new.exe RolsTraker.exe > nul 2>&1\n";
+                updater << "if not exist RolsTraker.exe (\n";
+                updater << "    timeout /t 1 /nobreak > nul\n";
+                updater << "    goto retry\n";
+                updater << ")\n";
+                updater << "del /f /q RolsTraker_new.exe > nul 2>&1\n";
+                updater << "del /f /q RolsTraker_old.exe > nul 2>&1\n";
+                updater << "start \"\" RolsTraker.exe\n";
+                updater << "del \"%~f0\"\n";
+                updater.close();
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(800)); // Let user see "restarting"
+            WinExec("cmd /c updater.bat", SW_HIDE);
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            exit(0);
+        } else {
+            g_updateStatus = ""; // Download failed, continue normally
+        }
+    } catch (...) {
+        g_updateStatus = "";
     }
 }
 
@@ -1238,10 +1250,9 @@ int main() {
         MoveWindow(console, r.left, r.top, 1000, 600, TRUE);
     }
 
-    // std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
-    checkAutoUpdate();
+    // Run auto-updater in background so UI starts immediately
+    std::thread(checkAutoUpdate).detach();
 
-    // std::cout << "Загрузка метаданных агентов и карт Valorant...\n";
     auto agentMap = getAgentMap();
     auto mapNameMap = getMapNameMap();
 

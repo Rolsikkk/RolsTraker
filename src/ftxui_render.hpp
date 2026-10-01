@@ -20,6 +20,7 @@ extern std::map<std::string, ftxui::Box> g_playerBoxes;
 extern ftxui::Box g_myStatsBox;
 extern int g_mouseX;
 extern int g_mouseY;
+extern std::string g_updateStatus;
 
 // FTXUI colors for parties
 const std::vector<Color> FTX_PARTY_COLORS = {
@@ -122,10 +123,13 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
     });
 }
 
-// Custom Google-style circle spinner: ◐ ◓ ◑ ◒
+// ASCII spinner that works on all Windows consoles: - \ | /
 inline ftxui::Element circleSpinner(int frame) {
     static const std::vector<std::string> frames = {
-        "◐", "◓", "◑", "◒"
+        "   -   ",
+        "  \\   ",
+        "   |   ",
+        "   /   "
     };
     int idx = (frame / 2) % (int)frames.size();
     return ftxui::text(frames[idx]);
@@ -135,13 +139,31 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     if (lock.port == 0) {
         static auto start_time_offline = std::chrono::steady_clock::now();
         int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_offline).count() / 100;
+
+        // Update status text
+        std::string updateText = "";
+        Color updateColor = Color::GrayDark;
+        if (g_updateStatus == "checking") {
+            updateText = " Проверка обновлений... ";
+        } else if (g_updateStatus.substr(0, 11) == "downloading") {
+            std::string ver = g_updateStatus.size() > 12 ? g_updateStatus.substr(12) : "";
+            updateText = " Скачивание обновления " + ver + "... ";
+            updateColor = Color::YellowLight;
+        } else if (g_updateStatus == "restarting") {
+            updateText = " Перезапуск... ";
+            updateColor = Color::GreenLight;
+        }
         
+        auto updateElem = updateText.empty()
+            ? ftxui::text("") 
+            : (ftxui::text(updateText) | ftxui::color(updateColor) | ftxui::center);
+
         return ftxui::vbox({
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
             ftxui::filler(),
             ftxui::text(" Riot Client не запущен! Ожидание запуска игры... ") | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
-            ftxui::text(" Автоматическая проверка каждые 3 секунды... ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center
+            updateElem
         });
     } 
     
@@ -149,6 +171,24 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         static auto start_time_idle = std::chrono::steady_clock::now();
         int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_idle).count() / 100;
         
+        // Update status text
+        std::string updateText = "";
+        Color updateColor = Color::GrayDark;
+        if (g_updateStatus == "checking") {
+            updateText = " Проверка обновлений... ";
+        } else if (g_updateStatus.size() > 11 && g_updateStatus.substr(0, 11) == "downloading") {
+            std::string ver = g_updateStatus.size() > 12 ? g_updateStatus.substr(12) : "";
+            updateText = " Скачивание обновления " + ver + "... ";
+            updateColor = Color::YellowLight;
+        } else if (g_updateStatus == "restarting") {
+            updateText = " Перезапуск... ";
+            updateColor = Color::GreenLight;
+        }
+        
+        auto updateElem = updateText.empty()
+            ? ftxui::text("") 
+            : (ftxui::text(updateText) | ftxui::color(updateColor) | ftxui::center);
+
         auto myStatsBtn = ftxui::text(" пока что вы можете увидеть свою статистику ") 
                         | ftxui::bold | ftxui::color(ftxui::Color::CyanLight)
                         | ftxui::reflect(g_myStatsBox);
@@ -161,6 +201,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
             ftxui::filler(),
+            updateElem,
             ftxui::text(" зайдите в матч чтобы увидеть информацию ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
             myStatsBtn | ftxui::center
         });
