@@ -29,7 +29,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.1";
+const std::string CURRENT_VERSION = "v1.1.3";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -66,6 +66,18 @@ static std::mutex g_mutex;
 static std::atomic<bool> g_running{true};
 
 // Globals are moved down below PlayerInfo
+
+// -----------------------------------------------------------------------------
+// VT Mode Helper (For Auto-Updater Colors)
+// -----------------------------------------------------------------------------
+void enableVTMode() {
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut == INVALID_HANDLE_VALUE) return;
+    DWORD dwMode = 0;
+    if (!GetConsoleMode(hOut, &dwMode)) return;
+    dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    SetConsoleMode(hOut, dwMode);
+}
 
 // -----------------------------------------------------------------------------
 // UTF-8 Visual Character Length & Padding Helpers for Alignment
@@ -406,7 +418,7 @@ void checkAutoUpdate() {
             }
         } catch (...) {}
     } else {
-        std::cout << COLOR_GRAY << " Проверка обновлений завершена.\n" << RESET;
+        std::cout << COLOR_RED << " [!] Не удалось проверить обновления (Код: " << res.statusCode << "). Возможно, исчерпан лимит GitHub API.\n" << RESET;
     }
 }
 
@@ -1082,6 +1094,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
 // -----------------------------------------------------------------------------
 int main() {
     SetConsoleOutputCP(CP_UTF8);
+    enableVTMode();
     std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
     checkAutoUpdate();
 
