@@ -68,18 +68,6 @@ static std::atomic<bool> g_running{true};
 // Globals are moved down below PlayerInfo
 
 // -----------------------------------------------------------------------------
-// VT Mode Helper (For Auto-Updater Colors)
-// -----------------------------------------------------------------------------
-void enableVTMode() {
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (hOut == INVALID_HANDLE_VALUE) return;
-    DWORD dwMode = 0;
-    if (!GetConsoleMode(hOut, &dwMode)) return;
-    dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-    SetConsoleMode(hOut, dwMode);
-}
-
-// -----------------------------------------------------------------------------
 // UTF-8 Visual Character Length & Padding Helpers for Alignment
 // -----------------------------------------------------------------------------
 size_t utf8_length(const std::string& str) {
@@ -350,20 +338,8 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
 // -----------------------------------------------------------------------------
 // Auto-Updater Module
 // -----------------------------------------------------------------------------
-const std::string RESET         = "\033[0m";
-const std::string BOLD          = "\033[1m";
-const std::string COLOR_RED     = "\033[1;31m";
-const std::string COLOR_BLUE    = "\033[1;34m";
-const std::string COLOR_CYAN    = "\033[1;36m";
-const std::string COLOR_GREEN   = "\033[1;32m";
-const std::string COLOR_YELLOW  = "\033[1;33m";
-const std::string COLOR_MAGENTA = "\033[1;35m";
-const std::string COLOR_BR_BLUE = "\033[1;94m";
-const std::string COLOR_GRAY    = "\033[90m";
-const std::string COLOR_WHITE   = "\033[1;97m";
-
 void checkAutoUpdate() {
-    std::cout << COLOR_CYAN << "Проверка обновлений на GitHub (" << GITHUB_REPO << ")...\n" << RESET;
+    std::cout << "Проверка обновлений на GitHub (" << GITHUB_REPO << ")...\n";
 
     std::map<std::string, std::string> headers = {
         {"User-Agent", "RolsTraker-App"},
@@ -391,11 +367,11 @@ void checkAutoUpdate() {
                     downloadUrl = "https://github.com/" + GITHUB_REPO + "/releases/download/" + latestTag + "/RolsTraker.exe";
                 }
 
-                std::cout << COLOR_GREEN << "\n [!] Найдено обновление! (Текущая: " << CURRENT_VERSION << ", Новая: " << latestTag << ")\n" << RESET;
+                std::cout << "\n [!] Найдено обновление! (Текущая: " << CURRENT_VERSION << ", Новая: " << latestTag << ")\n";
                 std::cout << " Скачивание обновленного файла RolsTraker.exe...\n";
 
                 if (downloadFileWithRedirects(downloadUrl, "RolsTraker_new.exe")) {
-                    std::cout << COLOR_CYAN << " Обновление успешно скачано! Перезапуск программы...\n" << RESET;
+                    std::cout << " Обновление успешно скачано! Перезапуск программы...\n";
 
                     std::ofstream updater("updater.bat");
                     if (updater.is_open()) {
@@ -411,14 +387,14 @@ void checkAutoUpdate() {
                     WinExec("cmd /c updater.bat", SW_HIDE);
                     exit(0);
                 } else {
-                    std::cout << COLOR_RED << " Ошибка при скачивании файла обновления.\n" << RESET;
+                    std::cout << " Ошибка при скачивании файла обновления.\n";
                 }
             } else {
-                std::cout << COLOR_GRAY << " У вас установлена актуальная версия (" << CURRENT_VERSION << ").\n" << RESET;
+                std::cout << " У вас установлена актуальная версия (" << CURRENT_VERSION << ").\n";
             }
         } catch (...) {}
     } else {
-        std::cout << COLOR_RED << " [!] Не удалось проверить обновления (Код: " << res.statusCode << "). Возможно, исчерпан лимит GitHub API.\n" << RESET;
+        std::cout << " [!] Не удалось проверить обновления (Код: " << res.statusCode << "). Возможно, исчерпан лимит GitHub API.\n";
     }
 }
 
@@ -486,6 +462,15 @@ struct RankDisplay {
     std::string name;
     std::string color;
 };
+
+const std::string COLOR_RED     = "\033[1;31m";
+const std::string COLOR_BLUE    = "\033[1;34m";
+const std::string COLOR_CYAN    = "\033[1;36m";
+const std::string COLOR_GREEN   = "\033[1;32m";
+const std::string COLOR_YELLOW  = "\033[1;33m";
+const std::string COLOR_MAGENTA = "\033[1;35m";
+const std::string COLOR_GRAY    = "\033[90m";
+const std::string COLOR_WHITE   = "\033[1;97m";
 
 RankDisplay formatRank(int tier, int rr) {
     if (tier <= 2) return {"Unrated", COLOR_GRAY};
@@ -1094,7 +1079,6 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
 // -----------------------------------------------------------------------------
 int main() {
     SetConsoleOutputCP(CP_UTF8);
-    enableVTMode();
     std::cout << "Запуск RolsTraker (" << CURRENT_VERSION << ")...\n";
     checkAutoUpdate();
 
