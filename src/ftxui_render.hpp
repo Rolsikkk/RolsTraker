@@ -124,12 +124,16 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
 
 inline ftxui::Element renderFTXUI(const MatchState& state, const Session& session, const Lockfile& lock, const std::map<std::string, std::string>& agentMap, const std::map<std::string, std::string>& mapNameMap) {
     if (lock.port == 0) {
+        static auto start_time = std::chrono::steady_clock::now();
+        int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count() / 100;
+        
         return ftxui::vbox({
-            ftxui::text("ROLSTRAKER (" + CURRENT_VERSION + ")") | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
-            ftxui::separator(),
-            ftxui::text("Riot Client не запущен! Ожидание запуска игры / Riot Client...") | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
-            ftxui::text("Автоматическая проверка каждые 3 секунды...") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center
-        }) | ftxui::border | ftxui::center;
+            ftxui::filler(),
+            ftxui::spinner(9, frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
+            ftxui::filler(),
+            ftxui::text(" Riot Client не запущен! Ожидание запуска игры... ") | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
+            ftxui::text(" Автоматическая проверка каждые 3 секунды... ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center
+        });
     } 
     
     if (state.phase == "none") {
@@ -146,14 +150,11 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
         return ftxui::vbox({
             ftxui::filler(),
-            ftxui::hbox({
-                ftxui::spinner(21, frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan),
-                ftxui::text(" ROLSTRAKER") | ftxui::bold | ftxui::color(ftxui::Color::White)
-            }) | ftxui::center,
+            ftxui::spinner(9, frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
+            ftxui::filler(),
             ftxui::text(" зайдите в матч чтобы увидеть информацию ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
-            myStatsBtn | ftxui::center,
-            ftxui::filler()
-        }) | ftxui::center;
+            myStatsBtn | ftxui::center
+        });
     }
 
     // Party counts & Group Assignment
