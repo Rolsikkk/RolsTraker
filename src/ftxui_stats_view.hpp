@@ -9,6 +9,69 @@
 
 #include "ftxui_render.hpp"
 
+inline ftxui::Element renderMatchScoreboard(const std::map<std::string, std::string>& agentMap) {
+    using namespace ftxui;
+    
+    if (g_selectedMatchId.empty() || g_matchScoreboards.find(g_selectedMatchId) == g_matchScoreboards.end()) {
+        return vbox(text("Загрузка данных матча...") | center, text("[ ESC - Назад ]") | center) | border;
+    }
+
+    auto& sb = g_matchScoreboards[g_selectedMatchId];
+    std::string scoreStr = std::to_string(sb.roundsBlue) + " : " + std::to_string(sb.roundsRed);
+    
+    std::vector<Element> rows;
+    rows.push_back(hbox({
+        text(" Агент ") | bold | size(WIDTH, EQUAL, 12), separator(),
+        text(" Игрок ") | bold | size(WIDTH, EQUAL, 20), separator(),
+        text(" Команда ") | bold | size(WIDTH, EQUAL, 10), separator(),
+        text(" K/D/A ") | bold | size(WIDTH, EQUAL, 15), separator(),
+        text(" Счёт ") | bold | size(WIDTH, EQUAL, 8)
+    }) | color(Color::CyanLight));
+    rows.push_back(separator());
+
+    // Sort by score
+    std::vector<PlayerMatchStat> pms = sb.players;
+    std::sort(pms.begin(), pms.end(), [](const PlayerMatchStat& a, const PlayerMatchStat& b) {
+        return a.score > b.score;
+    });
+
+    for (const auto& p : pms) {
+        std::string agentName = p.characterId;
+        std::string lowerId = p.characterId;
+        for(auto& c : lowerId) c = tolower(c);
+        for(const auto& [k, v] : agentMap) {
+            std::string lk = k;
+            for(auto& c : lk) c = tolower(c);
+            if (lk == lowerId) { agentName = v; break; }
+        }
+
+        std::string playerName = "Player";
+        if (g_nameCache.count(p.puuid)) {
+            playerName = g_nameCache[p.puuid].first + "#" + g_nameCache[p.puuid].second;
+        }
+
+        Color teamColor = (p.teamId == "Blue") ? Color::BlueLight : (p.teamId == "Red" ? Color::RedLight : Color::White);
+        
+        std::string kda = std::to_string(p.kills) + "/" + std::to_string(p.deaths) + "/" + std::to_string(p.assists);
+
+        rows.push_back(hbox({
+            text(" " + agentName + " ") | size(WIDTH, EQUAL, 12), separator(),
+            text(" " + playerName + " ") | size(WIDTH, EQUAL, 20), separator(),
+            text(" " + p.teamId + " ") | color(teamColor) | size(WIDTH, EQUAL, 10), separator(),
+            text(" " + kda + " ") | size(WIDTH, EQUAL, 15), separator(),
+            text(" " + std::to_string(p.score) + " ") | size(WIDTH, EQUAL, 8)
+        }));
+    }
+
+    return vbox(
+        text(" Таблица Матча: " + scoreStr) | bold | center,
+        separator(),
+        vbox(rows) | border,
+        filler(),
+        text("[ ESC - Назад ]") | center
+    ) | border;
+}
+
 inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>& agentMap) {
     using namespace ftxui;
 
@@ -114,22 +177,34 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         }
     }
     
-    auto matchHistoryBox = window(text(" Последние матчи (Нажми для открытия в браузере) ") | bold | color(Color::White), vbox(matchElems));
+    std::string loadingStr = "Загрузка...";
+    std::string kdStr = g_selectedPlayerInfo.isLoading ? loadingStr : (g_selectedPlayerInfo.kdRatio < 0 ? "N/A" : kdStream.str());
+    
+    float winPct = g_selectedPlayerInfo.matchesPlayed > 0 ? ((float)g_selectedPlayerInfo.matchesWon / g_selectedPlayerInfo.matchesPlayed) * 100.0f : 0.0f;
+    std::ostringstream winStream; winStream << std::fixed << std::setprecision(1) << winPct << "%";
+    std::string winStr = g_selectedPlayerInfo.isLoading ? loadingStr : (g_selectedPlayerInfo.matchesPlayed > 0 ? winStream.str() : "N/A");
+
+    int acs = g_selectedPlayerInfo.totalRounds > 0 ? g_selectedPlayerInfo.totalScore / g_selectedPlayerInfo.totalRounds : 0;
+    std::string acsStr = g_selectedPlayerInfo.isLoading ? loadingStr : (g_selectedPlayerInfo.totalRounds > 0 ? std::to_string(acs) : "N/A");
+
+    auto matchHistoryBox = window(text(" Последние матчи (Нажми для открытия таблицы) ") | bold | color(Color::White), vbox(matchElems));
 
     auto statsBox = window(text(" Подробная статистика игрока ") | bold | color(Color::Cyan),
         vbox(
             hbox(text(" Игрок: ") | bold, text(fullName) | color(Color::White)),
             separator(),
-            hbox(text(" Любимый Агент: ") | bold, text(favAgent) | color(Color::YellowLight)),
-            hbox(text(" K/D: ") | bold, text(g_selectedPlayerInfo.kdRatio < 0 ? "N/A" : kdStream.str()) | color(Color::GreenLight)),
-            separator(),
             hbox(
-                vbox(text(" Точность стрельбы:") | bold, bodyArt),
-                text("   "),
+                vbox(
+                    hbox(text(" Любимый Агент: ") | bold, text(favAgent) | color(Color::YellowLight)),
+                    hbox(text(" K/D: ") | bold, text(kdStr) | color(Color::GreenLight)),
+                    hbox(text(" Win %: ") | bold, text(winStr) | color(Color::MagentaLight)),
+                    hbox(text(" ACS: ") | bold, text(acsStr) | color(Color::RedLight))
+                ),
                 separator(),
-                text("   "),
-                matchHistoryBox | flex
-            )
+                vbox(text(" Точность стрельбы:") | bold, bodyArt)
+            ),
+            separator(),
+            matchHistoryBox
         )
     );
 

@@ -12,6 +12,7 @@
 #include <chrono>
 #include <thread>
 #include <mutex>
+#include <signal.h>
 #include <atomic>
 #include <iomanip>
 
@@ -29,7 +30,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.9";
+const std::string CURRENT_VERSION = "v1.1.10";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -49,8 +50,26 @@ struct PlayerStats {
     int headshots = 0;
     int bodyshots = 0;
     int legshots = 0;
+    int totalScore = 0;
+    int totalRounds = 0;
+    int matchesWon = 0;
+    int matchesPlayed = 0;
     std::map<std::string, int> agentPlays;
     std::vector<RecentMatch> recentMatches;
+};
+
+struct PlayerMatchStat {
+    std::string puuid;
+    std::string characterId;
+    std::string teamId;
+    int kills = 0, deaths = 0, assists = 0, score = 0;
+};
+
+struct MatchScoreboard {
+    std::string matchId;
+    int roundsRed = 0;
+    int roundsBlue = 0;
+    std::vector<PlayerMatchStat> players;
 };
 
 struct MatchDetailsCacheEntry {
@@ -66,6 +85,8 @@ struct MatchDetailsCacheEntry {
     int roundsLost;
     bool won;
 };
+
+static std::map<std::string, MatchScoreboard> g_matchScoreboards;
 struct RankCacheEntry {
     int tier;
     int rr;
@@ -471,13 +492,19 @@ struct PlayerInfo {
     int headshots = 0;
     int bodyshots = 0;
     int legshots = 0;
+    int totalScore = 0;
+    int totalRounds = 0;
+    int matchesWon = 0;
+    int matchesPlayed = 0;
+    bool isLoading = false;
     std::map<std::string, int> agentPlays;
     std::vector<RecentMatch> recentMatches;
 };
 
 // Global view state
-enum class AppView { MAIN, PLAYER_STATS };
+enum class AppView { MAIN, PLAYER_STATS, MATCH_SCOREBOARD };
 static AppView g_currentView = AppView::MAIN;
+static std::string g_selectedMatchId = "";
 static std::string g_selectedPuuid = "";
 static PlayerInfo g_selectedPlayerInfo;
 static std::map<std::string, ftxui::Box> g_playerBoxes;
@@ -847,6 +874,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
     // === K/D + Advanced Stats: from match list + match details ===
     auto mlr = httpRequest("GET", sess.pdHost, 443, "/match-history/v1/history/" + puuid, pdH, "", true, false);
     int kills = 0, deaths = 0, hs = 0, bs = 0, ls = 0;
+    int totalScore = 0, totalRounds = 0, matchesWon = 0, matchesPlayed = 0;
     std::map<std::string, int> agentPlays;
     std::vector<RecentMatch> recentMatches;
     bool kdOk = false;
@@ -868,6 +896,10 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                                 auto& ms = g_matchDetailsCache[mid][puuid];
                                 kills += ms.kills; deaths += ms.deaths;
                                 hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
+                                totalScore += ms.score;
+                                totalRounds += ms.roundsWon + ms.roundsLost;
+                                if (ms.won) matchesWon++;
+                                matchesPlayed++;
                                 if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
                                 recentMatches.push_back({mid, ms.characterId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
                                 kdOk = true; count++;
@@ -899,6 +931,11 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                             }
                         }
 
+                        MatchScoreboard sb;
+                        sb.matchId = mid;
+                        if (teamRoundsWon.count("Red")) sb.roundsRed = teamRoundsWon["Red"];
+                        if (teamRoundsWon.count("Blue")) sb.roundsBlue = teamRoundsWon["Blue"];
+
                         if (md.contains("players") && md["players"].is_array()) {
                             for (auto& p : md["players"]) {
                                 std::string subject = getJsonKeyStr(p, {"subject"});
@@ -914,7 +951,9 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                                 bool won = teamWon.count(teamId) ? teamWon[teamId] : false;
                                 int rWon = teamRoundsWon.count(teamId) ? teamRoundsWon[teamId] : 0;
                                 int rLost = teamRoundsLost.count(teamId) ? teamRoundsLost[teamId] : 0;
-                                matchStats[subject] = {pk, pd, hs, bs, ls, characterId, pa, pscore, rWon, rLost, won}; // hs, bs, ls will be added next
+                                matchStats[subject] = {pk, pd, hs, bs, ls, characterId, pa, pscore, rWon, rLost, won};
+                                
+                                sb.players.push_back({subject, characterId, teamId, pk, pd, pa, pscore});
                             }
                         }
                         
@@ -938,12 +977,17 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                         {
                             std::lock_guard<std::mutex> lk(g_mutex);
                             g_matchDetailsCache[mid] = matchStats;
+                            g_matchScoreboards[mid] = sb;
                         }
                         
                         if (matchStats.count(puuid)) {
                             auto& ms = matchStats[puuid];
                             kills += ms.kills; deaths += ms.deaths;
                             hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
+                            totalScore += ms.score;
+                            totalRounds += ms.roundsWon + ms.roundsLost;
+                            if (ms.won) matchesWon++;
+                            matchesPlayed++;
                             if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
                             recentMatches.push_back({mid, ms.characterId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
                             kdOk = true; count++;
@@ -959,7 +1003,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
     {
         std::lock_guard<std::mutex> lk(g_mutex);
         if (g_statsFetching.count(puuid)) {
-            g_statsCache[puuid] = {finalKd, hs, bs, ls, agentPlays, recentMatches};
+            g_statsCache[puuid] = {finalKd, hs, bs, ls, totalScore, totalRounds, matchesWon, matchesPlayed, agentPlays, recentMatches};
             g_statsFetching.erase(puuid);
         }
     }
@@ -1123,12 +1167,17 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
             p.headshots = g_statsCache[p.puuid].headshots;
             p.bodyshots = g_statsCache[p.puuid].bodyshots;
             p.legshots = g_statsCache[p.puuid].legshots;
+            p.totalScore = g_statsCache[p.puuid].totalScore;
+            p.totalRounds = g_statsCache[p.puuid].totalRounds;
+            p.matchesWon = g_statsCache[p.puuid].matchesWon;
+            p.matchesPlayed = g_statsCache[p.puuid].matchesPlayed;
             p.agentPlays = g_statsCache[p.puuid].agentPlays;
             p.recentMatches = g_statsCache[p.puuid].recentMatches;
         } else if (!g_statsFetching.count(p.puuid)) {
             g_statsFetching.insert(p.puuid);
             std::thread(fetchPlayerStats, session, p.puuid, pdHeaders).detach();
         }
+        p.isLoading = g_statsFetching.count(p.puuid) > 0;
     }
 }
 
@@ -1152,6 +1201,7 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
 int main() {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
+    signal(SIGINT, SIG_IGN);
 
     // Disable Quick Edit Mode (prevents stopping program by clicking)
     HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
@@ -1231,6 +1281,8 @@ int main() {
     auto renderer = ftxui::Renderer([&] {
         if (g_currentView == AppView::PLAYER_STATS) {
             return renderPlayerStats(agentMap);
+        } else if (g_currentView == AppView::MATCH_SCOREBOARD) {
+            return renderMatchScoreboard(agentMap);
         }
         return renderFTXUI(matchState, session, lock, agentMap, mapNameMap);
     });
@@ -1243,12 +1295,15 @@ int main() {
             return true;
         }
         
-        if (event == ftxui::Event::Special("\x03")) { // Ctrl+C
+        if (event == ftxui::Event::Special("\x03") || (event.is_character() && event.character() == "\x03")) { // Ctrl+C
             return true; 
         }
         
         if (event == ftxui::Event::Escape) {
-            if (g_currentView == AppView::PLAYER_STATS) {
+            if (g_currentView == AppView::MATCH_SCOREBOARD) {
+                g_currentView = AppView::PLAYER_STATS;
+                return true;
+            } else if (g_currentView == AppView::PLAYER_STATS) {
                 g_currentView = AppView::MAIN;
                 return true;
             } else {
@@ -1300,8 +1355,8 @@ int main() {
                         if (matchIdx < g_selectedPlayerInfo.recentMatches.size()) {
                             std::string matchId = g_selectedPlayerInfo.recentMatches[matchIdx].matchId;
                             if (!matchId.empty()) {
-                                std::string url = "https://tracker.gg/valorant/match/" + matchId;
-                                ShellExecuteA(0, 0, url.c_str(), 0, 0, SW_SHOW);
+                                g_selectedMatchId = matchId;
+                                g_currentView = AppView::MATCH_SCOREBOARD;
                             }
                         }
                         return true;
