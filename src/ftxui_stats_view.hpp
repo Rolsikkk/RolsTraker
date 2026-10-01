@@ -152,12 +152,28 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
             std::string kda = std::to_string(rm.kills) + " / " + std::to_string(rm.deaths) + " / " + std::to_string(rm.assists);
             std::string combatScore = std::to_string(rm.score);
 
+            std::string q = rm.queueId;
+            if (q == "competitive") q = "РЕЙТИНГ";
+            else if (q == "unrated") q = "БЕЗ РАНГА";
+            else if (q == "deathmatch") q = "ДМ";
+            else if (q == "ggteam") q = "ЭСКАЛАЦИЯ";
+            else if (q == "swiftplay") q = "БЫСТРАЯ";
+            else if (q == "spikerush") q = "SPIKE RUSH";
+            else if (q == "snowball") q = "СНЕЖКИ";
+            else if (q == "custom") q = "СВОЯ ИГРА";
+            else if (q.empty()) q = "НЕИЗВЕСТНО";
+            else {
+                for (auto& c : q) c = toupper(c);
+            }
+
             auto row = hbox({
                 text(" " + agent + " ") | bold | color(Color::CyanLight) | size(WIDTH, EQUAL, 12),
                 separator(),
+                text(" " + q + " ") | bold | color(Color::YellowLight) | size(WIDTH, EQUAL, 12),
+                separator(),
                 text(" " + resultStr + " (" + scoreStr + ") ") | bold | color(resultColor) | size(WIDTH, EQUAL, 20),
                 separator(),
-                text(" K/D/A: " + kda + " ") | color(Color::White) | size(WIDTH, EQUAL, 20),
+                text(" K/D/A: " + kda + " ") | color(Color::White) | size(WIDTH, EQUAL, 18),
                 separator(),
                 text(" СЧЁТ: " + combatScore + " ") | color(Color::GrayLight)
             }) | border | reflect(g_matchBoxes[i]);
@@ -187,9 +203,9 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     int acs = g_selectedPlayerInfo.totalRounds > 0 ? g_selectedPlayerInfo.totalScore / g_selectedPlayerInfo.totalRounds : 0;
     std::string acsStr = g_selectedPlayerInfo.isLoading ? loadingStr : (g_selectedPlayerInfo.totalRounds > 0 ? std::to_string(acs) : "N/A");
 
-    auto matchHistoryBox = window(text(" Последние матчи (Нажми для открытия таблицы) ") | bold | color(Color::White), vbox(matchElems));
+    auto matchHistoryBox = window(text(" Последние 20 матчей (Все режимы. Нажми для таблицы) ") | bold | color(Color::White), vbox(matchElems));
 
-    auto statsBox = window(text(" Подробная статистика игрока ") | bold | color(Color::Cyan),
+    auto statsBox = window(text(" Подробная статистика (Исключая Deathmatch/Кастомки) ") | bold | color(Color::Cyan),
         vbox(
             hbox(text(" Игрок: ") | bold, text(fullName) | color(Color::White)),
             separator(),

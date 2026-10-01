@@ -30,12 +30,13 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v1.1.10";
+const std::string CURRENT_VERSION = "v1.1.11";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
     std::string matchId;
     std::string characterId;
+    std::string queueId;
     int kills = 0;
     int deaths = 0;
     int assists = 0;
@@ -67,12 +68,14 @@ struct PlayerMatchStat {
 
 struct MatchScoreboard {
     std::string matchId;
+    std::string queueId;
     int roundsRed = 0;
     int roundsBlue = 0;
     std::vector<PlayerMatchStat> players;
 };
 
 struct MatchDetailsCacheEntry {
+    std::string queueId;
     int kills;
     int deaths;
     int headshots;
@@ -872,7 +875,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
     if (!g_running) return;
 
     // === K/D + Advanced Stats: from match list + match details ===
-    auto mlr = httpRequest("GET", sess.pdHost, 443, "/match-history/v1/history/" + puuid, pdH, "", true, false);
+    auto mlr = httpRequest("GET", sess.pdHost, 443, "/match-history/v1/history/" + puuid + "?startIndex=0&endIndex=20", pdH, "", true, false);
     int kills = 0, deaths = 0, hs = 0, bs = 0, ls = 0;
     int totalScore = 0, totalRounds = 0, matchesWon = 0, matchesPlayed = 0;
     std::map<std::string, int> agentPlays;
@@ -894,15 +897,20 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                         if (g_matchDetailsCache.count(mid)) {
                             if (g_matchDetailsCache[mid].count(puuid)) {
                                 auto& ms = g_matchDetailsCache[mid][puuid];
-                                kills += ms.kills; deaths += ms.deaths;
-                                hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
-                                totalScore += ms.score;
-                                totalRounds += ms.roundsWon + ms.roundsLost;
-                                if (ms.won) matchesWon++;
-                                matchesPlayed++;
-                                if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
-                                recentMatches.push_back({mid, ms.characterId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
-                                kdOk = true; count++;
+                                bool isStandard = ms.queueId.empty() || ms.queueId == "competitive" || ms.queueId == "unrated" || ms.queueId == "premier" || ms.queueId == "swiftplay";
+                                
+                                if (isStandard) {
+                                    kills += ms.kills; deaths += ms.deaths;
+                                    hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
+                                    totalScore += ms.score;
+                                    totalRounds += ms.roundsWon + ms.roundsLost;
+                                    if (ms.won) matchesWon++;
+                                    matchesPlayed++;
+                                    if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
+                                    kdOk = true; 
+                                }
+                                recentMatches.push_back({mid, ms.characterId, ms.queueId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
+                                count++;
                             }
                             foundInCache = true;
                         }
@@ -913,6 +921,11 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                     if (mr.statusCode == 200) {
                         auto md = json::parse(mr.body);
                         std::map<std::string, MatchDetailsCacheEntry> matchStats;
+                        
+                        std::string queueId = "";
+                        if (md.contains("matchInfo") && md["matchInfo"].is_object()) {
+                            queueId = getJsonKeyStr(md["matchInfo"], {"queueID"});
+                        }
                         
                         std::map<std::string, bool> teamWon;
                         std::map<std::string, int> teamRoundsWon;
@@ -951,7 +964,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                                 bool won = teamWon.count(teamId) ? teamWon[teamId] : false;
                                 int rWon = teamRoundsWon.count(teamId) ? teamRoundsWon[teamId] : 0;
                                 int rLost = teamRoundsLost.count(teamId) ? teamRoundsLost[teamId] : 0;
-                                matchStats[subject] = {pk, pd, hs, bs, ls, characterId, pa, pscore, rWon, rLost, won};
+                                matchStats[subject] = {queueId, pk, pd, hs, bs, ls, characterId, pa, pscore, rWon, rLost, won};
                                 
                                 sb.players.push_back({subject, characterId, teamId, pk, pd, pa, pscore});
                             }
@@ -982,15 +995,20 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                         
                         if (matchStats.count(puuid)) {
                             auto& ms = matchStats[puuid];
-                            kills += ms.kills; deaths += ms.deaths;
-                            hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
-                            totalScore += ms.score;
-                            totalRounds += ms.roundsWon + ms.roundsLost;
-                            if (ms.won) matchesWon++;
-                            matchesPlayed++;
-                            if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
-                            recentMatches.push_back({mid, ms.characterId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
-                            kdOk = true; count++;
+                            bool isStandard = ms.queueId.empty() || ms.queueId == "competitive" || ms.queueId == "unrated" || ms.queueId == "premier" || ms.queueId == "swiftplay";
+
+                            if (isStandard) {
+                                kills += ms.kills; deaths += ms.deaths;
+                                hs += ms.headshots; bs += ms.bodyshots; ls += ms.legshots;
+                                totalScore += ms.score;
+                                totalRounds += ms.roundsWon + ms.roundsLost;
+                                if (ms.won) matchesWon++;
+                                matchesPlayed++;
+                                if (!ms.characterId.empty()) agentPlays[ms.characterId]++;
+                                kdOk = true;
+                            }
+                            recentMatches.push_back({mid, ms.characterId, ms.queueId, ms.kills, ms.deaths, ms.assists, ms.score, ms.roundsWon, ms.roundsLost, ms.won});
+                            count++;
                         }
                     }
                 }
