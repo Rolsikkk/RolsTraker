@@ -33,7 +33,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.0.8";
+const std::string CURRENT_VERSION = "v2.2.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -1280,6 +1280,28 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
 
 void runCloudflaredTunnel() {
     Log("runCloudflaredTunnel started");
+
+    std::string configPath = getExeDir() + "config.json";
+    std::string cfToken = "";
+    std::string customUrl = "";
+
+    std::ifstream cfgIn(configPath);
+    if (cfgIn.is_open()) {
+        try {
+            json c = json::parse(cfgIn);
+            if (c.contains("cloudflaredToken")) cfToken = c["cloudflaredToken"];
+            if (c.contains("customUrl")) customUrl = c["customUrl"];
+        } catch(...) {}
+        cfgIn.close();
+    } else {
+        std::ofstream cfgOut(configPath);
+        if (cfgOut.is_open()) {
+            json c = {{"cloudflaredToken", ""}, {"customUrl", "https://status.твой-домен.ru"}};
+            cfgOut << c.dump(4);
+            cfgOut.close();
+        }
+    }
+
     std::string exePath = getExeDir() + "cloudflared.exe";
     if (GetFileAttributesA(exePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
         Log("cloudflared.exe not found, downloading to " + exePath);
@@ -1298,13 +1320,28 @@ void runCloudflaredTunnel() {
     si.hStdError = hWrite; si.hStdOutput = hWrite; si.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
 
-    std::string cmd = exePath + " tunnel --url http://127.0.0.1:18088";
+    std::string cmd;
+    if (!cfToken.empty()) {
+        cmd = exePath + " tunnel run --token " + cfToken;
+        if (!customUrl.empty() && customUrl != "https://status.твой-домен.ru") {
+            std::lock_guard<std::mutex> lk(g_webUrlMutex);
+            g_publicWebUrl = customUrl;
+        } else {
+            std::lock_guard<std::mutex> lk(g_webUrlMutex);
+            g_publicWebUrl = "Туннель запущен (URL из конфига)";
+        }
+        Log("Starting named tunnel with token");
+    } else {
+        cmd = exePath + " tunnel --url http://127.0.0.1:18088";
+        Log("Starting quick tunnel");
+    }
+
     if (CreateProcessA(NULL, (LPSTR)cmd.c_str(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         Log("cloudflared.exe started");
         CloseHandle(hWrite);
         char buffer[1024]; DWORD read; std::string output;
         std::regex urlRegex("https://[a-zA-Z0-9-]+\\.trycloudflare\\.com");
-        bool urlFound = false;
+        bool urlFound = !cfToken.empty(); // if token provided, we don't need to parse URL
         std::ofstream cfLog(getExeDir() + "cloudflared_out.log", std::ios_base::app);
         while (ReadFile(hRead, buffer, sizeof(buffer) - 1, &read, NULL) && read > 0) {
             buffer[read] = '\0';
