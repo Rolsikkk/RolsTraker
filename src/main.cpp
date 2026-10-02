@@ -109,6 +109,17 @@ static std::mutex g_mutex;
 static std::atomic<bool> g_running{true};
 static std::string g_updateStatus; // "" = idle, "checking" = checking, "downloading" = downloading, "done" = restarting
 static std::mutex g_updateMutex;
+static std::mutex g_logMutex;
+
+void Log(const std::string& msg) {
+    std::lock_guard<std::mutex> lk(g_logMutex);
+    std::ofstream out("rolstraker_debug.log", std::ios_base::app);
+    if (out.is_open()) {
+        auto now = std::chrono::system_clock::now();
+        std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+        out << std::ctime(&now_time) << ": " << msg << "\n";
+    }
+}
 
 // -----------------------------------------------------------------------------
 // UTF-8 Visual Character Length & Padding Helpers for Alignment
@@ -138,6 +149,24 @@ std::string padRightUtf8(const std::string& str, size_t targetWidth) {
 // -----------------------------------------------------------------------------
 static int g_statsMatchOffset = 0;
 static std::vector<ftxui::Box> g_matchBoxes;
+ftxui::Box g_webUrlBox;
+bool g_copiedLink = false;
+
+// -----------------------------------------------------------------------------
+// Clipboard Helper
+// -----------------------------------------------------------------------------
+void copyToClipboard(const std::string& text) {
+    if (OpenClipboard(nullptr)) {
+        EmptyClipboard();
+        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1);
+        if (hMem) {
+            memcpy(GlobalLock(hMem), text.c_str(), text.size() + 1);
+            GlobalUnlock(hMem);
+            SetClipboardData(CF_TEXT, hMem);
+        }
+        CloseClipboard();
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Base64 Helpers
@@ -1241,10 +1270,13 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
 }
 
 void runCloudflaredTunnel() {
+    Log("runCloudflaredTunnel started");
     std::string exePath = "cloudflared.exe";
     if (GetFileAttributesA(exePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        Log("cloudflared.exe not found, downloading...");
         { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Скачивание туннеля..."; }
         downloadFileWithRedirects("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe", exePath);
+        Log("cloudflared.exe downloaded");
     }
     { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Запуск сайта..."; }
 
@@ -1259,20 +1291,31 @@ void runCloudflaredTunnel() {
 
     std::string cmd = "cloudflared.exe tunnel --url http://localhost:8080";
     if (CreateProcessA(NULL, (LPSTR)cmd.c_str(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        Log("cloudflared.exe started");
         CloseHandle(hWrite);
         char buffer[1024]; DWORD read; std::string output;
         std::regex urlRegex("https://[a-zA-Z0-9-]+\\.trycloudflare\\.com");
+        bool urlFound = false;
         while (ReadFile(hRead, buffer, sizeof(buffer) - 1, &read, NULL) && read > 0) {
-            buffer[read] = '\0'; output += buffer;
-            std::smatch match;
-            if (std::regex_search(output, match, urlRegex)) {
-                std::lock_guard<std::mutex> lk(g_webUrlMutex);
-                g_publicWebUrl = match.str(0);
-                output.clear();
+            if (!urlFound) {
+                buffer[read] = '\0'; output += buffer;
+                std::smatch match;
+                if (std::regex_search(output, match, urlRegex)) {
+                    std::lock_guard<std::mutex> lk(g_webUrlMutex);
+                    g_publicWebUrl = match.str(0);
+                    Log("Tunnel URL found: " + g_publicWebUrl);
+                    urlFound = true;
+                    output.clear();
+                    output.shrink_to_fit();
+                } else if (output.size() > 1024 * 100) {
+                    output.clear(); // safety clear
+                }
             }
         }
+        Log("cloudflared.exe loop exited");
         CloseHandle(hRead); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
     } else {
+        Log("CreateProcessA failed for cloudflared.exe");
         CloseHandle(hWrite); CloseHandle(hRead);
         { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Ошибка туннеля"; }
     }
@@ -1330,6 +1373,7 @@ setInterval(update, 2000); window.onload=update;
 // Main Loop
 // -----------------------------------------------------------------------------
 int main() {
+    Log("Starting main()");
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
     signal(SIGINT, SIG_IGN);
@@ -1368,7 +1412,9 @@ int main() {
     std::atomic<bool> refresh_ui = true;
     
     // Background polling thread
+    Log("Starting polling thread");
     std::thread polling_thread([&]() {
+        Log("Polling thread running");
         auto lastCheck = std::chrono::steady_clock::now() - std::chrono::seconds(10);
         while (g_running) {
             auto now = std::chrono::steady_clock::now();
@@ -1456,6 +1502,22 @@ int main() {
         }
 
         if (event.is_mouse() && event.mouse().button == ftxui::Mouse::Left && event.mouse().motion == ftxui::Mouse::Released) {
+            if (g_webUrlBox.Contain(event.mouse().x, event.mouse().y)) {
+                std::string webUrl;
+                { std::lock_guard<std::mutex> lk(g_webUrlMutex); webUrl = g_publicWebUrl; }
+                if (webUrl.find("http") == 0) {
+                    copyToClipboard(webUrl);
+                    g_copiedLink = true;
+                    // Start a thread to reset copied status after 2 seconds
+                    std::thread([&screen]() {
+                        std::this_thread::sleep_for(std::chrono::seconds(2));
+                        g_copiedLink = false;
+                        screen.PostEvent(ftxui::Event::Custom);
+                    }).detach();
+                }
+                return true;
+            }
+
             if (g_currentView == AppView::MAIN) {
                 // Check "My Stats" button
                 if (g_myStatsBox.Contain(event.mouse().x, event.mouse().y) && !session.puuid.empty()) {

@@ -20,6 +20,8 @@ extern std::mutex g_webUrlMutex;
 extern PlayerInfo g_selectedPlayerInfo;
 extern std::map<std::string, ftxui::Box> g_playerBoxes;
 extern ftxui::Box g_myStatsBox;
+extern ftxui::Box g_webUrlBox;
+extern bool g_copiedLink;
 extern int g_mouseX;
 extern int g_mouseY;
 extern std::string g_updateStatus;
@@ -146,6 +148,17 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     std::string webUrl;
     { std::lock_guard<std::mutex> lk(g_webUrlMutex); webUrl = g_publicWebUrl; }
 
+    auto webUrlElement = ftxui::hbox({
+        ftxui::text(" Сайт: ") | ftxui::bold | ftxui::color(ftxui::Color::GrayLight),
+        ftxui::text(webUrl + (g_copiedLink ? " (Скопировано!)" : "")) 
+            | ftxui::color(g_copiedLink ? ftxui::Color::GreenLight : ftxui::Color::YellowLight) 
+            | ftxui::bold
+    }) | ftxui::reflect(g_webUrlBox);
+
+    if (g_webUrlBox.Contain(g_mouseX, g_mouseY)) {
+        webUrlElement = webUrlElement | ftxui::inverted;
+    }
+
     if (lock.port == 0) {
         static auto start_time_offline = std::chrono::steady_clock::now();
         int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_offline).count() / 100;
@@ -172,11 +185,11 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
             ftxui::filler(),
-            ftxui::text(" Сайт: " + webUrl) | ftxui::color(ftxui::Color::YellowLight) | ftxui::center,
             ftxui::text(" Riot Client не запущен! Ожидание запуска игры... ") | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
-            updateElem
+            updateElem,
+            webUrlElement | ftxui::center
         });
-    } 
+    }
     
     if (state.phase == "none") {
         static auto start_time_idle = std::chrono::steady_clock::now();
@@ -212,10 +225,10 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
             ftxui::filler(),
-            ftxui::text(" Сайт: " + webUrl) | ftxui::color(ftxui::Color::YellowLight) | ftxui::center,
             updateElem,
             ftxui::text(" зайдите в матч чтобы увидеть информацию ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
-            myStatsBtn | ftxui::center
+            myStatsBtn | ftxui::center,
+            webUrlElement | ftxui::center
         });
     }
 
@@ -239,8 +252,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     std::string phaseStr = (state.phase == "coregame") ? "В ИГРЕ (Core Game)" : "ВЫБОР АГЕНТА (Agent Select)";
 
     auto header = ftxui::hbox({
-        ftxui::text(" Сайт: ") | ftxui::bold, ftxui::text(webUrl) | ftxui::color(ftxui::Color::YellowLight) | ftxui::bold,
-        ftxui::text(" | Режим: ") | ftxui::bold, ftxui::text(phaseStr) | ftxui::color(ftxui::Color::Green) | ftxui::bold,
+        ftxui::text(" Режим: ") | ftxui::bold, ftxui::text(phaseStr) | ftxui::color(ftxui::Color::Green) | ftxui::bold,
         ftxui::text(" | Карта: ") | ftxui::bold, ftxui::text(displayMapName.empty() ? "N/A" : displayMapName) | ftxui::color(ftxui::Color::YellowLight) | ftxui::bold,
         ftxui::text(" | Сервер: ") | ftxui::bold, ftxui::text(session.region) | ftxui::color(ftxui::Color::Cyan) | ftxui::bold,
     }) | ftxui::center;
@@ -276,7 +288,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler() | ftxui::flex,
             (g_myStatsBox.Contain(g_mouseX, g_mouseY) 
                 ? ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::inverted | ftxui::reflect(g_myStatsBox)
-                : ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::reflect(g_myStatsBox))
-        })
+                : ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::reflect(g_myStatsBox)),
+            ftxui::filler() | ftxui::flex
+        }),
+        webUrlElement | ftxui::center
     }) | ftxui::border;
 }
