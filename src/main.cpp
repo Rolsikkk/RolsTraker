@@ -33,7 +33,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.0.6";
+const std::string CURRENT_VERSION = "v2.0.7";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -1305,9 +1305,13 @@ void runCloudflaredTunnel() {
         char buffer[1024]; DWORD read; std::string output;
         std::regex urlRegex("https://[a-zA-Z0-9-]+\\.trycloudflare\\.com");
         bool urlFound = false;
+        std::ofstream cfLog(getExeDir() + "cloudflared_out.log", std::ios_base::app);
         while (ReadFile(hRead, buffer, sizeof(buffer) - 1, &read, NULL) && read > 0) {
+            buffer[read] = '\0';
+            cfLog << buffer;
+            cfLog.flush();
             if (!urlFound) {
-                buffer[read] = '\0'; output += buffer;
+                output += buffer;
                 std::smatch match;
                 if (std::regex_search(output, match, urlRegex)) {
                     std::lock_guard<std::mutex> lk(g_webUrlMutex);
@@ -1334,6 +1338,7 @@ void runWebServer() {
     Log("runWebServer starting");
     httplib::Server svr;
     svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
+        Log("Received request to / from cloudflared!");
         std::string html = R"(
 <!DOCTYPE html><html><head><meta charset="UTF-8"><title>RolsTraker Live</title>
 <style>body{background:#111;color:#fff;font-family:sans-serif;text-align:center;}table{margin:20px auto;border-collapse:collapse;width:90%;max-width:800px;}th,td{border:1px solid #333;padding:10px;}th{background:#222;}.Red{color:#ff4655;}.Blue{color:#00e5ff;}.Ally{color:#00e5ff;}</style>
@@ -1356,6 +1361,7 @@ setInterval(update, 2000); window.onload=update;
         res.set_content(html, "text/html");
     });
     svr.Get("/api/match", [](const httplib::Request& req, httplib::Response& res) {
+        Log("Received request to /api/match from cloudflared!");
         json j = {{"phase", "none"}, {"players", json::array()}};
         {
             std::lock_guard<std::mutex> lk(g_mutex);
