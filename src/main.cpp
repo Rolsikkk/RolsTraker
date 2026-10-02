@@ -1289,7 +1289,7 @@ void runCloudflaredTunnel() {
     si.hStdError = hWrite; si.hStdOutput = hWrite; si.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
 
-    std::string cmd = "cloudflared.exe tunnel --url http://localhost:8080";
+    std::string cmd = "cloudflared.exe tunnel --url http://127.0.0.1:18088";
     if (CreateProcessA(NULL, (LPSTR)cmd.c_str(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         Log("cloudflared.exe started");
         CloseHandle(hWrite);
@@ -1322,6 +1322,7 @@ void runCloudflaredTunnel() {
 }
 
 void runWebServer() {
+    Log("runWebServer starting");
     httplib::Server svr;
     svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
         std::string html = R"(
@@ -1366,7 +1367,10 @@ setInterval(update, 2000); window.onload=update;
         }
         res.set_content(j.dump(), "application/json");
     });
-    svr.listen("0.0.0.0", 8080);
+    Log("Starting listen on 0.0.0.0:18088");
+    if (!svr.listen("0.0.0.0", 18088)) {
+        Log("Failed to start web server on port 18088!");
+    }
 }
 
 // -----------------------------------------------------------------------------
