@@ -33,7 +33,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.0.5";
+const std::string CURRENT_VERSION = "v2.0.6";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -1376,8 +1376,8 @@ setInterval(update, 2000); window.onload=update;
         }
         res.set_content(j.dump(), "application/json");
     });
-    Log("Starting listen on 0.0.0.0:18088");
-    if (!svr.listen("0.0.0.0", 18088)) {
+    Log("Starting listen on 127.0.0.1:18088");
+    if (!svr.listen("127.0.0.1", 18088)) {
         Log("Failed to start web server on port 18088!");
     }
 }
