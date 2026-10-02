@@ -15,6 +15,8 @@ using namespace ftxui;
 
 extern AppView g_currentView;
 extern std::string g_selectedPuuid;
+extern std::string g_publicWebUrl;
+extern std::mutex g_webUrlMutex;
 extern PlayerInfo g_selectedPlayerInfo;
 extern std::map<std::string, ftxui::Box> g_playerBoxes;
 extern ftxui::Box g_myStatsBox;
@@ -141,6 +143,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     std::string updateStatus;
     { std::lock_guard<std::mutex> lk(g_updateMutex); updateStatus = g_updateStatus; }
 
+    std::string webUrl;
+    { std::lock_guard<std::mutex> lk(g_webUrlMutex); webUrl = g_publicWebUrl; }
+
     if (lock.port == 0) {
         static auto start_time_offline = std::chrono::steady_clock::now();
         int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_offline).count() / 100;
@@ -167,6 +172,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
             ftxui::filler(),
+            ftxui::text(" Сайт: " + webUrl) | ftxui::color(ftxui::Color::YellowLight) | ftxui::center,
             ftxui::text(" Riot Client не запущен! Ожидание запуска игры... ") | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
             updateElem
         });
@@ -206,6 +212,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
             ftxui::filler(),
+            ftxui::text(" Сайт: " + webUrl) | ftxui::color(ftxui::Color::YellowLight) | ftxui::center,
             updateElem,
             ftxui::text(" зайдите в матч чтобы увидеть информацию ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
             myStatsBtn | ftxui::center
@@ -232,7 +239,8 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     std::string phaseStr = (state.phase == "coregame") ? "В ИГРЕ (Core Game)" : "ВЫБОР АГЕНТА (Agent Select)";
 
     auto header = ftxui::hbox({
-        ftxui::text(" Режим: ") | ftxui::bold, ftxui::text(phaseStr) | ftxui::color(ftxui::Color::Green) | ftxui::bold,
+        ftxui::text(" Сайт: ") | ftxui::bold, ftxui::text(webUrl) | ftxui::color(ftxui::Color::YellowLight) | ftxui::bold,
+        ftxui::text(" | Режим: ") | ftxui::bold, ftxui::text(phaseStr) | ftxui::color(ftxui::Color::Green) | ftxui::bold,
         ftxui::text(" | Карта: ") | ftxui::bold, ftxui::text(displayMapName.empty() ? "N/A" : displayMapName) | ftxui::color(ftxui::Color::YellowLight) | ftxui::bold,
         ftxui::text(" | Сервер: ") | ftxui::bold, ftxui::text(session.region) | ftxui::color(ftxui::Color::Cyan) | ftxui::bold,
     }) | ftxui::center;

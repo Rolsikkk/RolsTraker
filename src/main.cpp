@@ -1,3 +1,5 @@
+#define _WIN32_WINNT 0x0A00
+#include <winsock2.h>
 #include <windows.h>
 #include <winhttp.h>
 #include <conio.h>
@@ -17,6 +19,7 @@
 #include <iomanip>
 
 #include <nlohmann/json.hpp>
+#include "httplib.h"
 
 // FTXUI Headers
 #include <ftxui/dom/elements.hpp>
@@ -30,7 +33,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.0.0";
+const std::string CURRENT_VERSION = "v2.0.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -522,6 +525,11 @@ struct MatchState {
     std::string mapName;
     std::vector<PlayerInfo> players;
 };
+
+static std::string g_publicWebUrl = "Инициализация сервера...";
+static std::mutex g_webUrlMutex;
+static MatchState g_liveMatchState;
+static std::map<std::string, std::string> g_globalAgentMap;
 
 struct RankDisplay {
     std::string name;
@@ -1070,6 +1078,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
         if (nameRes.statusCode == 200) {
             try {
                 auto j = json::parse(nameRes.body);
+                std::lock_guard<std::mutex> lk(g_mutex);
                 for (const auto& item : j) {
                     std::string subject = getJsonKeyStr(item, {"Subject", "subject"});
                     std::string gameName = getJsonKeyStr(item, {"GameName", "gameName"});
@@ -1079,26 +1088,33 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                 }
             } catch (...) {}
         }
-        for (auto& p : players) {
-            if (g_nameCache.count(p.puuid)) {
-                p.gameName = g_nameCache[p.puuid].first;
-                p.tagLine = g_nameCache[p.puuid].second;
-            } else if (p.gameName.empty()) {
-                p.gameName = "Player";
-                p.tagLine = "VAL";
+        // Update player names from newly cached data
+        {
+            std::lock_guard<std::mutex> lk(g_mutex);
+            for (auto& p : players) {
+                if (g_nameCache.count(p.puuid)) {
+                    p.gameName = g_nameCache[p.puuid].first;
+                    p.tagLine = g_nameCache[p.puuid].second;
+                } else if (p.gameName.empty()) {
+                    p.gameName = "Player";
+                    p.tagLine = "VAL";
+                }
             }
         }
     }
 
-    // 2. Resolve uncached ranks (MMR)
+    // 2. Resolve uncached ranks (MMR) - check cache under lock first
     for (auto& p : players) {
-        if (g_rankCache.count(p.puuid)) {
-            p.rankTier = g_rankCache[p.puuid].tier;
-            p.rankRR = g_rankCache[p.puuid].rr;
-            p.wins = g_rankCache[p.puuid].wins;
-            p.losses = g_rankCache[p.puuid].losses;
-            p.peakRankTier = g_rankCache[p.puuid].peakTier;
-            continue;
+        {
+            std::lock_guard<std::mutex> lk(g_mutex);
+            if (g_rankCache.count(p.puuid)) {
+                p.rankTier = g_rankCache[p.puuid].tier;
+                p.rankRR = g_rankCache[p.puuid].rr;
+                p.wins = g_rankCache[p.puuid].wins;
+                p.losses = g_rankCache[p.puuid].losses;
+                p.peakRankTier = g_rankCache[p.puuid].peakTier;
+                continue;
+            }
         }
 
         auto mmrRes = httpRequest("GET", session.pdHost, 443, "/mmr/v1/players/" + p.puuid, pdHeaders, "", true, false);
@@ -1186,25 +1202,27 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
         }
     }
 
-    // 3. Resolve K/D asynchronously
-    for (auto& p : players) {
+    // 3. Resolve K/D asynchronously (single lock for the whole loop)
+    {
         std::lock_guard<std::mutex> lk(g_mutex);
-        if (g_statsCache.count(p.puuid)) {
-            p.kdRatio = g_statsCache[p.puuid].kdRatio;
-            p.headshots = g_statsCache[p.puuid].headshots;
-            p.bodyshots = g_statsCache[p.puuid].bodyshots;
-            p.legshots = g_statsCache[p.puuid].legshots;
-            p.totalScore = g_statsCache[p.puuid].totalScore;
-            p.totalRounds = g_statsCache[p.puuid].totalRounds;
-            p.matchesWon = g_statsCache[p.puuid].matchesWon;
-            p.matchesPlayed = g_statsCache[p.puuid].matchesPlayed;
-            p.agentPlays = g_statsCache[p.puuid].agentPlays;
-            p.recentMatches = g_statsCache[p.puuid].recentMatches;
-        } else if (!g_statsFetching.count(p.puuid)) {
-            g_statsFetching.insert(p.puuid);
-            std::thread(fetchPlayerStats, session, p.puuid, pdHeaders).detach();
+        for (auto& p : players) {
+            if (g_statsCache.count(p.puuid)) {
+                p.kdRatio = g_statsCache[p.puuid].kdRatio;
+                p.headshots = g_statsCache[p.puuid].headshots;
+                p.bodyshots = g_statsCache[p.puuid].bodyshots;
+                p.legshots = g_statsCache[p.puuid].legshots;
+                p.totalScore = g_statsCache[p.puuid].totalScore;
+                p.totalRounds = g_statsCache[p.puuid].totalRounds;
+                p.matchesWon = g_statsCache[p.puuid].matchesWon;
+                p.matchesPlayed = g_statsCache[p.puuid].matchesPlayed;
+                p.agentPlays = g_statsCache[p.puuid].agentPlays;
+                p.recentMatches = g_statsCache[p.puuid].recentMatches;
+            } else if (!g_statsFetching.count(p.puuid)) {
+                g_statsFetching.insert(p.puuid);
+                std::thread(fetchPlayerStats, session, p.puuid, pdHeaders).detach();
+            }
+            p.isLoading = g_statsFetching.count(p.puuid) > 0;
         }
-        p.isLoading = g_statsFetching.count(p.puuid) > 0;
     }
 }
 
@@ -1220,6 +1238,92 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
         return TRUE; // Ignore Ctrl+C
     }
     return FALSE;
+}
+
+void runCloudflaredTunnel() {
+    std::string exePath = "cloudflared.exe";
+    if (GetFileAttributesA(exePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Скачивание туннеля..."; }
+        downloadFileWithRedirects("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe", exePath);
+    }
+    { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Запуск сайта..."; }
+
+    SECURITY_ATTRIBUTES sa; sa.nLength = sizeof(sa); sa.bInheritHandle = TRUE; sa.lpSecurityDescriptor = NULL;
+    HANDLE hRead, hWrite; CreatePipe(&hRead, &hWrite, &sa, 0);
+    SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
+    STARTUPINFOA si; ZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
+    si.dwFlags |= STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.hStdError = hWrite; si.hStdOutput = hWrite; si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
+
+    std::string cmd = "cloudflared.exe tunnel --url http://localhost:8080";
+    if (CreateProcessA(NULL, (LPSTR)cmd.c_str(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        CloseHandle(hWrite);
+        char buffer[1024]; DWORD read; std::string output;
+        std::regex urlRegex("https://[a-zA-Z0-9-]+\\.trycloudflare\\.com");
+        while (ReadFile(hRead, buffer, sizeof(buffer) - 1, &read, NULL) && read > 0) {
+            buffer[read] = '\0'; output += buffer;
+            std::smatch match;
+            if (std::regex_search(output, match, urlRegex)) {
+                std::lock_guard<std::mutex> lk(g_webUrlMutex);
+                g_publicWebUrl = match.str(0);
+                output.clear();
+            }
+        }
+        CloseHandle(hRead); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    } else {
+        CloseHandle(hWrite); CloseHandle(hRead);
+        { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Ошибка туннеля"; }
+    }
+}
+
+void runWebServer() {
+    httplib::Server svr;
+    svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
+        std::string html = R"(
+<!DOCTYPE html><html><head><meta charset="UTF-8"><title>RolsTraker Live</title>
+<style>body{background:#111;color:#fff;font-family:sans-serif;text-align:center;}table{margin:20px auto;border-collapse:collapse;width:90%;max-width:800px;}th,td{border:1px solid #333;padding:10px;}th{background:#222;}.Red{color:#ff4655;}.Blue{color:#00e5ff;}.Ally{color:#00e5ff;}</style>
+<script>
+async function update(){
+    try{
+        let res = await fetch('/api/match'); let data = await res.json();
+        if(data.phase==="none"){ document.getElementById('content').innerHTML='<h2>Вне матча</h2>'; return; }
+        let html='<h2>'+(data.phase==="coregame"?"В ИГРЕ":"ВЫБОР АГЕНТА")+'</h2><table><tr><th>Игрок</th><th>Агент</th><th>Ранг</th><th>K/D</th></tr>';
+        for(let p of data.players){
+            let kd = p.kd >= 0 ? p.kd.toFixed(2) : 'N/A';
+            html+='<tr class="'+p.team+'"><td>'+p.name+'</td><td>'+p.agent+'</td><td>'+p.rank+'</td><td>'+kd+'</td></tr>';
+        }
+        html+='</table>'; document.getElementById('content').innerHTML=html;
+    }catch(e){}
+}
+setInterval(update, 2000); window.onload=update;
+</script></head><body><h1>RolsTraker Live Stats</h1><div id="content"><h2>Загрузка...</h2></div></body></html>
+        )";
+        res.set_content(html, "text/html");
+    });
+    svr.Get("/api/match", [](const httplib::Request& req, httplib::Response& res) {
+        json j = {{"phase", "none"}, {"players", json::array()}};
+        {
+            std::lock_guard<std::mutex> lk(g_mutex);
+            j["phase"] = g_liveMatchState.phase;
+            for (const auto& p : g_liveMatchState.players) {
+                json pj; pj["team"] = p.teamId;
+                std::string fullName = p.gameName;
+                if (g_nameCache.count(p.puuid)) fullName = g_nameCache[p.puuid].first + "#" + g_nameCache[p.puuid].second;
+                pj["name"] = fullName;
+                pj["agent"] = g_globalAgentMap.count(p.characterId) ? g_globalAgentMap[p.characterId] : "Выбирает...";
+                std::string rankName = "Unrated";
+                if (g_rankCache.count(p.puuid)) rankName = formatRank(g_rankCache[p.puuid].tier, g_rankCache[p.puuid].rr).name;
+                pj["rank"] = rankName;
+                float kd = -1.0f; if (g_statsCache.count(p.puuid)) kd = g_statsCache[p.puuid].kdRatio;
+                pj["kd"] = kd;
+                j["players"].push_back(pj);
+            }
+        }
+        res.set_content(j.dump(), "application/json");
+    });
+    svr.listen("0.0.0.0", 8080);
 }
 
 // -----------------------------------------------------------------------------
@@ -1249,6 +1353,10 @@ int main() {
 
     auto agentMap = getAgentMap();
     auto mapNameMap = getMapNameMap();
+    
+    g_globalAgentMap = agentMap;
+    std::thread(runWebServer).detach();
+    std::thread(runCloudflaredTunnel).detach();
 
     // std::cout << "Метаданные успешно загружены!\n";
 
@@ -1286,6 +1394,8 @@ int main() {
                 } else {
                     matchState = MatchState();
                 }
+                
+                { std::lock_guard<std::mutex> lk(g_mutex); g_liveMatchState = matchState; }
                 
                 // Keep selectedPlayerInfo updated if we are viewing it
                 if (g_currentView == AppView::PLAYER_STATS && !g_selectedPuuid.empty()) {
