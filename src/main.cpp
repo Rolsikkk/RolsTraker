@@ -111,9 +111,18 @@ static std::string g_updateStatus; // "" = idle, "checking" = checking, "downloa
 static std::mutex g_updateMutex;
 static std::mutex g_logMutex;
 
+std::string getExeDir() {
+    char buffer[MAX_PATH];
+    GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    std::string path(buffer);
+    size_t pos = path.find_last_of("\\/");
+    return (pos != std::string::npos) ? path.substr(0, pos) + "\\" : "";
+}
+
 void Log(const std::string& msg) {
     std::lock_guard<std::mutex> lk(g_logMutex);
-    std::ofstream out("rolstraker_debug.log", std::ios_base::app);
+    std::string logPath = getExeDir() + "rolstraker_debug.log";
+    std::ofstream out(logPath, std::ios_base::app);
     if (out.is_open()) {
         auto now = std::chrono::system_clock::now();
         std::time_t now_time = std::chrono::system_clock::to_time_t(now);
@@ -1271,9 +1280,9 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
 
 void runCloudflaredTunnel() {
     Log("runCloudflaredTunnel started");
-    std::string exePath = "cloudflared.exe";
+    std::string exePath = getExeDir() + "cloudflared.exe";
     if (GetFileAttributesA(exePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        Log("cloudflared.exe not found, downloading...");
+        Log("cloudflared.exe not found, downloading to " + exePath);
         { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Скачивание туннеля..."; }
         downloadFileWithRedirects("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe", exePath);
         Log("cloudflared.exe downloaded");
@@ -1289,7 +1298,7 @@ void runCloudflaredTunnel() {
     si.hStdError = hWrite; si.hStdOutput = hWrite; si.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
 
-    std::string cmd = "cloudflared.exe tunnel --url http://127.0.0.1:18088";
+    std::string cmd = exePath + " tunnel --url http://127.0.0.1:18088";
     if (CreateProcessA(NULL, (LPSTR)cmd.c_str(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         Log("cloudflared.exe started");
         CloseHandle(hWrite);
