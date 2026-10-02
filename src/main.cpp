@@ -17,9 +17,7 @@
 #include <signal.h>
 #include <atomic>
 #include <iomanip>
-
 #include <nlohmann/json.hpp>
-#include "httplib.h"
 
 // FTXUI Headers
 #include <ftxui/dom/elements.hpp>
@@ -1278,90 +1276,51 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
     return FALSE;
 }
 
-void runCloudflaredTunnel() {
-    Log("runCloudflaredTunnel started");
-    std::string exePath = getExeDir() + "cloudflared.exe";
-    if (GetFileAttributesA(exePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        Log("cloudflared.exe not found, downloading to " + exePath);
-        { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Скачивание туннеля..."; }
-        downloadFileWithRedirects("https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe", exePath);
-        Log("cloudflared.exe downloaded");
-    }
-    { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Запуск сайта..."; }
+void runDataPusher() {
+    Log("runDataPusher started");
+    std::string configPath = getExeDir() + "config.json";
+    std::string pushUrl = "https://status.example.ru/api/update";
 
-    SECURITY_ATTRIBUTES sa; sa.nLength = sizeof(sa); sa.bInheritHandle = TRUE; sa.lpSecurityDescriptor = NULL;
-    HANDLE hRead, hWrite; CreatePipe(&hRead, &hWrite, &sa, 0);
-    SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
-
-    STARTUPINFOA si; ZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
-    si.dwFlags |= STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    si.hStdError = hWrite; si.hStdOutput = hWrite; si.wShowWindow = SW_HIDE;
-    PROCESS_INFORMATION pi; ZeroMemory(&pi, sizeof(pi));
-
-    std::string cmd = exePath + " tunnel --url http://127.0.0.1:18088";
-    if (CreateProcessA(NULL, (LPSTR)cmd.c_str(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        Log("cloudflared.exe started");
-        CloseHandle(hWrite);
-        char buffer[1024]; DWORD read; std::string output;
-        std::regex urlRegex("https://[a-zA-Z0-9-]+\\.trycloudflare\\.com");
-        bool urlFound = false;
-        std::ofstream cfLog(getExeDir() + "cloudflared_out.log", std::ios_base::app);
-        while (ReadFile(hRead, buffer, sizeof(buffer) - 1, &read, NULL) && read > 0) {
-            buffer[read] = '\0';
-            cfLog << buffer;
-            cfLog.flush();
-            if (!urlFound) {
-                output += buffer;
-                std::smatch match;
-                if (std::regex_search(output, match, urlRegex)) {
-                    std::lock_guard<std::mutex> lk(g_webUrlMutex);
-                    g_publicWebUrl = match.str(0);
-                    Log("Tunnel URL found: " + g_publicWebUrl);
-                    urlFound = true;
-                    output.clear();
-                    output.shrink_to_fit();
-                } else if (output.size() > 1024 * 100) {
-                    output.clear(); // safety clear
-                }
-            }
-        }
-        Log("cloudflared.exe loop exited");
-        CloseHandle(hRead); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    // Create or read config
+    std::ifstream cfgIn(configPath);
+    if (cfgIn.is_open()) {
+        try {
+            json c = json::parse(cfgIn);
+            if (c.contains("pushUrl")) pushUrl = c["pushUrl"];
+        } catch(...) {}
+        cfgIn.close();
     } else {
-        Log("CreateProcessA failed for cloudflared.exe");
-        CloseHandle(hWrite); CloseHandle(hRead);
-        { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Ошибка туннеля"; }
-    }
-}
-
-void runWebServer() {
-    Log("runWebServer starting");
-    httplib::Server svr;
-    svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
-        Log("Received request to / from cloudflared!");
-        std::string html = R"(
-<!DOCTYPE html><html><head><meta charset="UTF-8"><title>RolsTraker Live</title>
-<style>body{background:#111;color:#fff;font-family:sans-serif;text-align:center;}table{margin:20px auto;border-collapse:collapse;width:90%;max-width:800px;}th,td{border:1px solid #333;padding:10px;}th{background:#222;}.Red{color:#ff4655;}.Blue{color:#00e5ff;}.Ally{color:#00e5ff;}</style>
-<script>
-async function update(){
-    try{
-        let res = await fetch('/api/match'); let data = await res.json();
-        if(data.phase==="none"){ document.getElementById('content').innerHTML='<h2>Вне матча</h2>'; return; }
-        let html='<h2>'+(data.phase==="coregame"?"В ИГРЕ":"ВЫБОР АГЕНТА")+'</h2><table><tr><th>Игрок</th><th>Агент</th><th>Ранг</th><th>K/D</th></tr>';
-        for(let p of data.players){
-            let kd = p.kd >= 0 ? p.kd.toFixed(2) : 'N/A';
-            html+='<tr class="'+p.team+'"><td>'+p.name+'</td><td>'+p.agent+'</td><td>'+p.rank+'</td><td>'+kd+'</td></tr>';
+        std::ofstream cfgOut(configPath);
+        if (cfgOut.is_open()) {
+            json c = {{"pushUrl", pushUrl}};
+            cfgOut << c.dump(4);
+            cfgOut.close();
         }
-        html+='</table>'; document.getElementById('content').innerHTML=html;
-    }catch(e){}
-}
-setInterval(update, 2000); window.onload=update;
-</script></head><body><h1>RolsTraker Live Stats</h1><div id="content"><h2>Загрузка...</h2></div></body></html>
-        )";
-        res.set_content(html, "text/html");
-    });
-    svr.Get("/api/match", [](const httplib::Request& req, httplib::Response& res) {
-        Log("Received request to /api/match from cloudflared!");
+    }
+
+    { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Загрузка..."; }
+    
+    // Extract domain, port, and path from URL
+    std::regex urlReg(R"(^(https?)://([^/:]+)(?::(\d+))?(/.*)?$)");
+    std::smatch m;
+    if (!std::regex_match(pushUrl, m, urlReg)) {
+        Log("Invalid pushUrl format");
+        return;
+    }
+    bool isHttps = (m[1] == "https");
+    std::string host = m[2];
+    int port = isHttps ? 443 : 80;
+    if (m[3].matched) port = std::stoi(m[3]);
+    std::string path = m[4].matched ? m[4].str() : "/api/update";
+
+    // Set the web UI URL to just the base URL
+    std::string baseUrl = m[1].str() + "://" + host;
+    if (m[3].matched) baseUrl += ":" + m[3].str();
+    { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = baseUrl; }
+
+    Log("Data pusher configured for host: " + host + " path: " + path);
+
+    while (true) {
         json j = {{"phase", "none"}, {"players", json::array()}};
         {
             std::lock_guard<std::mutex> lk(g_mutex);
@@ -1380,11 +1339,15 @@ setInterval(update, 2000); window.onload=update;
                 j["players"].push_back(pj);
             }
         }
-        res.set_content(j.dump(), "application/json");
-    });
-    Log("Starting listen on 127.0.0.1:18088");
-    if (!svr.listen("127.0.0.1", 18088)) {
-        Log("Failed to start web server on port 18088!");
+        
+        std::map<std::string, std::string> headers = { {"Content-Type", "application/json"} };
+        auto res = httpRequest("POST", host, port, path, headers, j.dump(), isHttps, false);
+        
+        if (res.statusCode != 200) {
+            Log("Failed to push data: HTTP " + std::to_string(res.statusCode));
+        }
+        
+        std::this_thread::sleep_for(std::chrono::seconds(2));
     }
 }
 
@@ -1418,8 +1381,7 @@ int main() {
     auto mapNameMap = getMapNameMap();
     
     g_globalAgentMap = agentMap;
-    std::thread(runWebServer).detach();
-    std::thread(runCloudflaredTunnel).detach();
+    std::thread(runDataPusher).detach();
 
     // std::cout << "Метаданные успешно загружены!\n";
 
