@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.8";
+const std::string CURRENT_VERSION = "v2.4.9";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -272,8 +272,9 @@ HttpResponse httpRequest(
         std::lock_guard<std::mutex> lk(g_httpMutex);
         if (!g_hSession) {
             g_hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-            if (g_hSession) {
-                WinHttpSetTimeouts(g_hSession, 5000, 5000, 10000, 10000);
+            if (!g_hSession) {
+                std::ofstream dbg("debug_api.txt", std::ios::app);
+                dbg << "WinHttpOpen failed, error: " << GetLastError() << "\n";
             }
         }
     }
@@ -282,6 +283,8 @@ HttpResponse httpRequest(
     std::wstring wHost(host.begin(), host.end());
     HINTERNET hConnect = WinHttpConnect(g_hSession, wHost.c_str(), port, 0);
     if (!hConnect) {
+        std::ofstream dbg("debug_api.txt", std::ios::app);
+        dbg << "WinHttpConnect failed for " << host << ", error: " << GetLastError() << "\n";
         return response;
     }
 
@@ -291,6 +294,8 @@ HttpResponse httpRequest(
 
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, wMethod.c_str(), wPath.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, dwFlags);
     if (!hRequest) {
+        std::ofstream dbg("debug_api.txt", std::ios::app);
+        dbg << "WinHttpOpenRequest failed for " << path << ", error: " << GetLastError() << "\n";
         WinHttpCloseHandle(hConnect);
         return response;
     }
@@ -310,18 +315,23 @@ HttpResponse httpRequest(
         wHeaders += wk + L": " + wv + L"\r\n";
     }
 
+    std::ofstream dbg("debug_api.txt", std::ios::app);
+    
     BOOL bResults = WinHttpSendRequest(
         hRequest,
         wHeaders.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : wHeaders.c_str(),
-        (DWORD)wHeaders.length(),
+        wHeaders.empty() ? 0 : -1L,
         bodyData.empty() ? WINHTTP_NO_REQUEST_DATA : (LPVOID)bodyData.c_str(),
-        (DWORD)bodyData.length(),
-        (DWORD)bodyData.length(),
+        bodyData.empty() ? 0 : (DWORD)bodyData.length(),
+        bodyData.empty() ? 0 : (DWORD)bodyData.length(),
         0
     );
 
     if (bResults) {
         bResults = WinHttpReceiveResponse(hRequest, NULL);
+    } else {
+        dbg << "WinHttpSendRequest failed, error: " << GetLastError() << " for " << host << path << "\n";
+        dbg.flush();
     }
 
     if (bResults) {
@@ -338,6 +348,9 @@ HttpResponse httpRequest(
             }
             response.body.append(buffer.data(), dwDownloaded);
         }
+    } else if (response.statusCode == 0) {
+        dbg << "WinHttpReceiveResponse failed, error: " << GetLastError() << " for " << host << path << "\n";
+        dbg.flush();
     }
 
     WinHttpCloseHandle(hRequest);
@@ -853,14 +866,45 @@ std::map<std::string, std::string> getAgentMap() {
                 auto j = json::parse(res.body);
                 for (const auto& item : j["data"]) {
                     std::string uuid = item["uuid"].get<std::string>();
-                    // Convert UUID to lowercase just in case
                     for (auto& c : uuid) c = tolower(c);
                     agents[uuid] = item["displayName"].get<std::string>();
                 }
                 break;
             } catch (...) {}
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    if (agents.empty()) {
+        agents = {
+            {"e370fa57-4757-3604-3648-499e1f642d3f", "Gekko"},
+            {"dade69b4-4f5a-8528-247b-219e5a1facd6", "Fade"},
+            {"5f8d3a7f-467b-97f3-062c-13acf203c006", "Breach"},
+            {"cc8b64c8-4b25-4ff9-6e7f-37b4da43d235", "Deadlock"},
+            {"b444168c-4e35-8076-db47-ef9bf368f384", "Tejo"},
+            {"f94c3b30-42be-e959-889c-5aa313dba261", "Raze"},
+            {"22697a3d-45bf-8dd7-4fec-84a9e28c69d7", "Chamber"},
+            {"601dbbe7-43ce-be57-2a40-4abd24953621", "KAY/O"},
+            {"6f2a04ca-43e0-be17-7f36-b3908627744d", "Skye"},
+            {"117ed9e3-49f3-6512-3ccf-0cada7e3823b", "Cypher"},
+            {"320b2a48-4d9b-a075-30f1-1f93a9b638fa", "Sova"},
+            {"7c8a4701-4de6-9355-b254-e09bc2a34b72", "Miks"},
+            {"1e58de9c-4950-5125-93e9-a0aee9f98746", "Killjoy"},
+            {"95b78ed7-4637-86d9-7e41-71ba8c293152", "Harbor"},
+            {"efba5359-4016-a1e5-7626-b1ae76895940", "Vyse"},
+            {"707eab51-4836-f488-046a-cda6bf494859", "Viper"},
+            {"eb93336a-449b-9c1b-0a54-a891f7921d69", "Phoenix"},
+            {"92eeef5d-43b5-1d4a-8d03-b3927a09034b", "Veto"},
+            {"41fb69c1-4189-7b37-f117-bcaf1e96f1bf", "Astra"},
+            {"9f0d8ba9-4140-b941-57d3-a7ad57c6b417", "Brimstone"},
+            {"0e38b510-41a8-5780-5e8f-568b2a4f2d6c", "Iso"},
+            {"1dbf2edd-4729-0984-3115-daa5eed44993", "Clove"},
+            {"bb2a4828-46eb-8cd1-e765-15848195d751", "Neon"},
+            {"7f94d92c-4234-0a36-9646-3a87eb8b5c89", "Yoru"},
+            {"df1cb487-4902-002e-5c17-d28e83e78588", "Waylay"},
+            {"569fdd95-4d10-43ab-ca70-79becc718b46", "Sage"},
+            {"a3bfb853-43b2-7238-a4f1-ad90e9e46bcc", "Reyna"},
+            {"8e253930-4c05-31dd-1b6c-968525494517", "Omen"},
+            {"add6443a-41bd-e414-f6ad-e58d267f4e95", "Jett"}
+        };
     }
     return agents;
 }
@@ -880,7 +924,37 @@ std::map<std::string, std::string> getMapNameMap() {
                 break;
             } catch (...) {}
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    if (maps.empty()) {
+        maps = {
+            {"/Game/Maps/AbilityDraft/AbilityDraft", "Gauntlet"},
+            {"/Game/Maps/Ascent/Ascent", "Ascent"},
+            {"/Game/Maps/Bonsai/Bonsai", "Split"},
+            {"/Game/Maps/Canyon/Canyon", "Fracture"},
+            {"/Game/Maps/Duality/Duality", "Bind"},
+            {"/Game/Maps/Duel/Duel_1/Skirmish_A", "Столкновение A"},
+            {"/Game/Maps/Duel/Duel_2/Skirmish_B", "Столкновение B"},
+            {"/Game/Maps/Duel/Duel_3/Skirmish_C", "Столкновение C"},
+            {"/Game/Maps/Duel/Duel_Heady/Skirmish_E", "Столкновение E"},
+            {"/Game/Maps/Duel/Duel_Platform/Skirmish_D", "Столкновение D"},
+            {"/Game/Maps/Foxtrot/Foxtrot", "Breeze"},
+            {"/Game/Maps/HURM/HURM_Alley/HURM_Alley", "District"},
+            {"/Game/Maps/HURM/HURM_Bowl/HURM_Bowl", "Kasbah"},
+            {"/Game/Maps/HURM/HURM_Helix/HURM_Helix", "Drift"},
+            {"/Game/Maps/HURM/HURM_HighTide/HURM_HighTide", "Glitch"},
+            {"/Game/Maps/HURM/HURM_Yard/HURM_Yard", "Piazza"},
+            {"/Game/Maps/Infinity/Infinity", "Abyss"},
+            {"/Game/Maps/Jam/Jam", "Lotus"},
+            {"/Game/Maps/Juliett/Juliett", "Sunset"},
+            {"/Game/Maps/NPEV2/NPEV2", "Базовое обучение"},
+            {"/Game/Maps/Pitt/Pitt", "Pearl"},
+            {"/Game/Maps/Plummet/Plummet", "Summit"},
+            {"/Game/Maps/Port/Port", "Icebox"},
+            {"/Game/Maps/Poveglia/Range", "Стрельбище"},
+            {"/Game/Maps/PovegliaV2/RangeV2", "Стрельбище"},
+            {"/Game/Maps/Rook/Rook", "Corrode"},
+            {"/Game/Maps/Triad/Triad", "Haven"}
+        };
     }
     return maps;
 }
