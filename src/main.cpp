@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.3";
+const std::string CURRENT_VERSION = "v2.4.4";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -201,12 +201,16 @@ std::string base64_encode(const std::string& in) {
 }
 
 std::string base64_decode(const std::string& in) {
-    std::vector<int> T(256, -1);
-    for (int i = 0; i < 64; i++) T[BASE64_CHARS[i]] = i;
+    static const std::vector<int> T = []() {
+        std::vector<int> t(256, -1);
+        for (int i = 0; i < 64; i++) t[BASE64_CHARS[i]] = i;
+        return t;
+    }();
 
     std::string out;
     int val = 0, valb = -8;
     for (unsigned char c : in) {
+        if (c == '=' || c == ' ' || c == '\r' || c == '\n') continue;
         if (T[c] == -1) break;
         val = (val << 6) + T[c];
         valb += 6;
@@ -225,6 +229,9 @@ std::string getJsonKeyStr(const json& j, const std::vector<std::string>& keys) {
     for (const auto& k : keys) {
         if (j.contains(k) && !j[k].is_null()) {
             if (j[k].is_string()) return j[k].get<std::string>();
+            if (j[k].is_number_integer()) return std::to_string(j[k].get<int64_t>());
+            if (j[k].is_number_float()) return std::to_string(j[k].get<double>());
+            if (j[k].is_boolean()) return j[k].get<bool>() ? "true" : "false";
         }
     }
     return "";
@@ -649,10 +656,16 @@ Lockfile readLockfile() {
     };
 
     for (const auto& lockPath : candidatePaths) {
-        std::ifstream file(lockPath);
-        if (file.is_open()) {
-            std::string line;
-            if (std::getline(file, line)) {
+        HANDLE hFile = CreateFileA(lockPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            char buffer[512] = {0};
+            DWORD bytesRead = 0;
+            if (ReadFile(hFile, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
+                buffer[bytesRead] = '\0';
+                std::string line(buffer);
+                size_t firstNewline = line.find_first_of("\r\n");
+                if (firstNewline != std::string::npos) line = line.substr(0, firstNewline);
+
                 std::stringstream ss(line);
                 std::vector<std::string> parts;
                 std::string part;
@@ -666,9 +679,11 @@ Lockfile readLockfile() {
                     lock.password = parts[3];
                     lock.protocol = parts[4];
                     lock.lockPathUsed = lockPath;
+                    CloseHandle(hFile);
                     return lock;
                 }
             }
+            CloseHandle(hFile);
         }
     }
     return lock;
@@ -695,20 +710,27 @@ std::pair<std::string, std::string> readShardFromLog() {
         std::string logPath = std::string(localAppData) + "\\VALORANT\\Saved\\Logs\\ShooterGame.log";
         free(localAppData);
 
-        std::ifstream file(logPath);
-        if (file.is_open()) {
-            std::string line;
-            std::regex re("glz-([a-zA-Z0-9]+)-1\\.([a-zA-Z0-9]+)\\.a\\.pvp\\.net", std::regex::icase);
-            std::smatch match;
-            while (std::getline(file, line)) {
-                if (std::regex_search(line, match, re) && match.size() >= 3) {
-                    std::string region = match[1].str();
-                    std::string shard = match[2].str();
-                    for (auto& c : region) c = tolower(c);
-                    for (auto& c : shard) c = tolower(c);
-                    return {region, shard};
+        HANDLE hFile = CreateFileA(logPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            DWORD fileSize = GetFileSize(hFile, NULL);
+            if (fileSize > 0 && fileSize < 50 * 1024 * 1024) {
+                std::string buffer(fileSize, '\0');
+                DWORD bytesRead = 0;
+                if (ReadFile(hFile, &buffer[0], fileSize, &bytesRead, NULL)) {
+                    buffer.resize(bytesRead);
+                    std::regex re("glz-([a-zA-Z0-9]+)-1\\.([a-zA-Z0-9]+)\\.a\\.pvp\\.net", std::regex::icase);
+                    std::smatch match;
+                    if (std::regex_search(buffer, match, re) && match.size() >= 3) {
+                        std::string region = match[1].str();
+                        std::string shard = match[2].str();
+                        for (auto& c : region) c = tolower(c);
+                        for (auto& c : shard) c = tolower(c);
+                        CloseHandle(hFile);
+                        return {region, shard};
+                    }
                 }
             }
+            CloseHandle(hFile);
         }
     }
     return {"", ""};
