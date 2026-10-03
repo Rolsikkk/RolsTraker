@@ -14,6 +14,7 @@
 #include <chrono>
 #include <thread>
 #include <mutex>
+#include <random>
 #include <signal.h>
 #include <atomic>
 #include <iomanip>
@@ -31,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.3.0";
+const std::string CURRENT_VERSION = "v2.3.2";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -566,6 +567,18 @@ static std::string g_publicWebUrl = "Инициализация сервера..
 static std::mutex g_webUrlMutex;
 static MatchState g_liveMatchState;
 static std::map<std::string, std::string> g_globalAgentMap;
+static std::map<std::string, std::string> g_globalMapNameMap;
+static std::string g_serverRegion = "N/A";
+static std::string g_sessionToken;
+
+std::string generateRandomToken(int length = 8) {
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_int_distribution<> dist(0, sizeof(charset) - 2);
+    std::string result;
+    for (int i = 0; i < length; i++) result += charset[dist(rng)];
+    return result;
+}
 
 struct RankDisplay {
     std::string name;
@@ -1312,11 +1325,12 @@ void runDataPusher() {
     int port = isHttps ? 443 : 80;
     if (m[3].matched) port = std::stoi(m[3]);
     std::string path = m[4].matched ? m[4].str() : "/api/update";
+    path += "?t=" + g_sessionToken;
 
-    // Set the web UI URL to just the base URL
+    // Set the web UI URL to just the base URL + token
     std::string baseUrl = m[1].str() + "://" + host;
     if (m[3].matched) baseUrl += ":" + m[3].str();
-    { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = baseUrl; }
+    { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = baseUrl + "/?t=" + g_sessionToken; }
 
     Log("Data pusher configured for host: " + host + " path: " + path);
 
@@ -1325,6 +1339,12 @@ void runDataPusher() {
         {
             std::lock_guard<std::mutex> lk(g_mutex);
             j["phase"] = g_liveMatchState.phase;
+            std::string displayMapName = g_liveMatchState.mapId;
+            if (g_globalMapNameMap.count(g_liveMatchState.mapId)) {
+                displayMapName = g_globalMapNameMap[g_liveMatchState.mapId];
+            }
+            j["map"] = displayMapName;
+            j["server"] = g_serverRegion;
             for (const auto& p : g_liveMatchState.players) {
                 json pj; pj["team"] = p.teamId;
                 std::string fullName = p.gameName;
@@ -1336,11 +1356,40 @@ void runDataPusher() {
                 pj["rank"] = rankName;
                 float kd = -1.0f; if (g_statsCache.count(p.puuid)) kd = g_statsCache[p.puuid].kdRatio;
                 pj["kd"] = kd;
+                pj["partyId"] = p.partyId;
+                pj["wins"] = g_rankCache.count(p.puuid) ? g_rankCache[p.puuid].wins : 0;
+                pj["losses"] = g_rankCache.count(p.puuid) ? g_rankCache[p.puuid].losses : 0;
+                if (g_statsCache.count(p.puuid)) {
+                    const auto& stats = g_statsCache[p.puuid];
+                    pj["hs"] = stats.headshots;
+                    pj["bs"] = stats.bodyshots;
+                    pj["ls"] = stats.legshots;
+                    pj["totalScore"] = stats.totalScore;
+                    pj["totalRounds"] = stats.totalRounds;
+                    pj["matchesPlayed"] = stats.matchesPlayed;
+                    json rMatches = json::array();
+                    for (const auto& rm : stats.recentMatches) {
+                        json rj;
+                        rj["queue"] = rm.queueId;
+                        rj["agent"] = g_globalAgentMap.count(rm.characterId) ? g_globalAgentMap[rm.characterId] : rm.characterId;
+                        rj["k"] = rm.kills;
+                        rj["d"] = rm.deaths;
+                        rj["a"] = rm.assists;
+                        rj["won"] = rm.won;
+                        rj["rw"] = rm.roundsWon;
+                        rj["rl"] = rm.roundsLost;
+                        rMatches.push_back(rj);
+                    }
+                    pj["recentMatches"] = rMatches;
+                }
                 j["players"].push_back(pj);
             }
         }
         
-        std::map<std::string, std::string> headers = { {"Content-Type", "application/json"} };
+        std::map<std::string, std::string> headers = { 
+            {"Content-Type", "application/json"},
+            {"Connection", "close"}
+        };
         auto res = httpRequest("POST", host, port, path, headers, j.dump(), isHttps, false);
         
         if (res.statusCode != 200) {
@@ -1356,6 +1405,7 @@ void runDataPusher() {
 // -----------------------------------------------------------------------------
 int main() {
     Log("Starting main()");
+    g_sessionToken = generateRandomToken();
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
     signal(SIGINT, SIG_IGN);
@@ -1381,6 +1431,7 @@ int main() {
     auto mapNameMap = getMapNameMap();
     
     g_globalAgentMap = agentMap;
+    g_globalMapNameMap = mapNameMap;
     std::thread(runDataPusher).detach();
 
     // std::cout << "Метаданные успешно загружены!\n";
@@ -1422,7 +1473,7 @@ int main() {
                     matchState = MatchState();
                 }
                 
-                { std::lock_guard<std::mutex> lk(g_mutex); g_liveMatchState = matchState; }
+                { std::lock_guard<std::mutex> lk(g_mutex); g_liveMatchState = matchState; g_serverRegion = session.region; }
                 
                 // Keep selectedPlayerInfo updated if we are viewing it
                 if (g_currentView == AppView::PLAYER_STATS && !g_selectedPuuid.empty()) {

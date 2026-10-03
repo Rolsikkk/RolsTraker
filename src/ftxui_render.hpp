@@ -187,6 +187,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler(),
             ftxui::text(" Riot Client не запущен! Ожидание запуска игры... ") | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
             updateElem,
+            ftxui::filler(),
             webUrlElement | ftxui::center
         });
     }
@@ -228,6 +229,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             updateElem,
             ftxui::text(" зайдите в матч чтобы увидеть информацию ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
             myStatsBtn | ftxui::center,
+            ftxui::filler(),
             webUrlElement | ftxui::center
         });
     }
@@ -291,6 +293,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
                 : ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::reflect(g_myStatsBox)),
             ftxui::filler() | ftxui::flex
         }),
+        ftxui::filler() | ftxui::flex,
         webUrlElement | ftxui::center
     }) | ftxui::border;
 }
