@@ -1301,7 +1301,7 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
 void runDataPusher() {
     Log("runDataPusher started");
     std::string configPath = getExeDir() + "config.json";
-    std::string pushUrl = "https://status.example.ru/api/update";
+    std::string pushUrl = "https://rolstraker.3fun.workers.dev/api/update";
 
     // Create or read config
     std::ifstream cfgIn(configPath);
