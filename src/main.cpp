@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.4";
+const std::string CURRENT_VERSION = "v2.4.5";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -166,11 +166,19 @@ std::atomic<bool> g_copiedLink{false};
 void copyToClipboard(const std::string& text) {
     if (OpenClipboard(nullptr)) {
         EmptyClipboard();
-        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1);
-        if (hMem) {
-            memcpy(GlobalLock(hMem), text.c_str(), text.size() + 1);
-            GlobalUnlock(hMem);
-            SetClipboardData(CF_TEXT, hMem);
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+        if (wlen > 0) {
+            HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, wlen * sizeof(wchar_t));
+            if (hMem) {
+                wchar_t* pMem = static_cast<wchar_t*>(GlobalLock(hMem));
+                if (pMem) {
+                    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, pMem, wlen);
+                    GlobalUnlock(hMem);
+                    SetClipboardData(CF_UNICODETEXT, hMem);
+                } else {
+                    GlobalFree(hMem);
+                }
+            }
         }
         CloseClipboard();
     }
@@ -264,6 +272,9 @@ HttpResponse httpRequest(
         std::lock_guard<std::mutex> lk(g_httpMutex);
         if (!g_hSession) {
             g_hSession = WinHttpOpen(L"RolsTraker/1.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+            if (g_hSession) {
+                WinHttpSetTimeouts(g_hSession, 5000, 5000, 10000, 10000);
+            }
         }
     }
     if (!g_hSession) return response;
@@ -320,16 +331,13 @@ HttpResponse httpRequest(
         response.statusCode = dwStatusCode;
 
         DWORD dwDownloaded = 0;
-        do {
-            dwSize = 0;
-            if (!WinHttpQueryDataAvailable(hRequest, &dwSize)) break;
-            if (dwSize == 0) break;
-
-            std::vector<char> buffer(dwSize + 1);
-            if (WinHttpReadData(hRequest, (LPVOID)buffer.data(), dwSize, &dwDownloaded)) {
-                response.body.append(buffer.data(), dwDownloaded);
+        while (WinHttpQueryDataAvailable(hRequest, &dwSize) && dwSize > 0) {
+            std::vector<char> buffer(dwSize);
+            if (!WinHttpReadData(hRequest, (LPVOID)buffer.data(), dwSize, &dwDownloaded) || dwDownloaded == 0) {
+                break;
             }
-        } while (dwSize > 0);
+            response.body.append(buffer.data(), dwDownloaded);
+        }
     }
 
     WinHttpCloseHandle(hRequest);
@@ -354,6 +362,7 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
 
         HINTERNET hSession = WinHttpOpen(L"RolsTraker-Downloader/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession) return false;
+        WinHttpSetTimeouts(hSession, 10000, 10000, 30000, 30000);
 
         std::wstring wHost(host.begin(), host.end());
         HINTERNET hConnect = WinHttpConnect(hSession, wHost.c_str(), 443, 0);
@@ -384,7 +393,11 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
                 DWORD locationSize = sizeof(locationBuffer);
                 if (WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_LOCATION, WINHTTP_HEADER_NAME_BY_INDEX, locationBuffer, &locationSize, WINHTTP_NO_HEADER_INDEX)) {
                     std::wstring wLoc(locationBuffer);
-                    currentUrl = std::string(wLoc.begin(), wLoc.end());
+                    std::string nextUrl(wLoc.begin(), wLoc.end());
+                    if (nextUrl.find("://") == std::string::npos) {
+                        nextUrl = "https://" + host + (nextUrl.front() == '/' ? "" : "/") + nextUrl;
+                    }
+                    currentUrl = nextUrl;
                     WinHttpCloseHandle(hRequest);
                     WinHttpCloseHandle(hConnect);
                     WinHttpCloseHandle(hSession);
@@ -393,6 +406,10 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
             }
 
             if (dwStatusCode == 200) {
+                DWORD contentLength = 0;
+                DWORD clSize = sizeof(contentLength);
+                bool hasContentLength = WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &contentLength, &clSize, WINHTTP_NO_HEADER_INDEX);
+
                 std::ofstream outFile(outputPath, std::ios::binary);
                 if (!outFile.is_open()) {
                     WinHttpCloseHandle(hRequest);
@@ -402,20 +419,27 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
                 }
 
                 DWORD dwDownloaded = 0;
-                do {
-                    dwSize = 0;
-                    if (!WinHttpQueryDataAvailable(hRequest, &dwSize)) break;
-                    if (dwSize == 0) break;
+                DWORD totalDownloaded = 0;
+                bool downloadOk = true;
+                while (WinHttpQueryDataAvailable(hRequest, &dwSize) && dwSize > 0) {
                     std::vector<char> buffer(dwSize);
-                    if (WinHttpReadData(hRequest, (LPVOID)buffer.data(), dwSize, &dwDownloaded)) {
-                        outFile.write(buffer.data(), dwDownloaded);
+                    if (!WinHttpReadData(hRequest, (LPVOID)buffer.data(), dwSize, &dwDownloaded) || dwDownloaded == 0) {
+                        downloadOk = false;
+                        break;
                     }
-                } while (dwSize > 0);
+                    outFile.write(buffer.data(), dwDownloaded);
+                    totalDownloaded += dwDownloaded;
+                }
 
                 outFile.close();
                 WinHttpCloseHandle(hRequest);
                 WinHttpCloseHandle(hConnect);
                 WinHttpCloseHandle(hSession);
+
+                if (!downloadOk || totalDownloaded == 0 || (hasContentLength && totalDownloaded != contentLength)) {
+                    DeleteFileA(outputPath.c_str());
+                    return false;
+                }
                 return true;
             }
         }
@@ -448,7 +472,11 @@ void checkAutoUpdate() {
     try {
         auto j = json::parse(res.body);
         std::string latestTag = getJsonKeyStr(j, {"tag_name"});
-        if (latestTag.empty() || latestTag == CURRENT_VERSION) {
+        auto normVer = [](std::string v) {
+            if (!v.empty() && (v.front() == 'v' || v.front() == 'V')) v.erase(0, 1);
+            return v;
+        };
+        if (latestTag.empty() || normVer(latestTag) == normVer(CURRENT_VERSION)) {
             { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = ""; }
             return;
         }
