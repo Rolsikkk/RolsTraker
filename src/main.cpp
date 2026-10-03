@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.1";
+const std::string CURRENT_VERSION = "v2.4.2";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -77,27 +77,27 @@ struct MatchScoreboard {
 };
 
 struct MatchDetailsCacheEntry {
-    std::string queueId;
-    int kills;
-    int deaths;
-    int headshots;
-    int bodyshots;
-    int legshots;
-    std::string characterId;
-    int assists;
-    int score;
-    int roundsWon;
-    int roundsLost;
-    bool won;
+    std::string queueId = "";
+    int kills = 0;
+    int deaths = 0;
+    int headshots = 0;
+    int bodyshots = 0;
+    int legshots = 0;
+    std::string characterId = "";
+    int assists = 0;
+    int score = 0;
+    int roundsWon = 0;
+    int roundsLost = 0;
+    bool won = false;
 };
 
 static std::map<std::string, MatchScoreboard> g_matchScoreboards;
 struct RankCacheEntry {
-    int tier;
-    int rr;
-    int wins;
-    int losses;
-    int peakTier;
+    int tier = 0;
+    int rr = 0;
+    int wins = 0;
+    int losses = 0;
+    int peakTier = 0;
 };
 static std::map<std::string, std::pair<std::string, std::string>> g_nameCache;
 static std::map<std::string, RankCacheEntry> g_rankCache;
@@ -465,37 +465,39 @@ void checkAutoUpdate() {
         char exePathBuf[MAX_PATH];
         GetModuleFileNameA(NULL, exePathBuf, MAX_PATH);
         std::string currentExePath = exePathBuf;
+        std::string exeDir = getExeDir();
         std::string exeName = "RolsTraker.exe";
         size_t lastSlash = currentExePath.find_last_of("\\/");
         if (lastSlash != std::string::npos) {
             exeName = currentExePath.substr(lastSlash + 1);
         }
-        std::string newExeName = exeName + "_new";
-        std::string oldExeName = exeName + "_old";
+        std::string newExePath = exeDir + exeName + "_new";
+        std::string oldExePath = exeDir + exeName + "_old";
+        std::string updaterBatPath = exeDir + "updater.bat";
 
-        if (downloadFileWithRedirects(downloadUrl, newExeName)) {
+        if (downloadFileWithRedirects(downloadUrl, newExePath)) {
             { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "restarting"; }
 
-            std::ofstream updater("updater.bat");
+            std::ofstream updater(updaterBatPath);
             if (updater.is_open()) {
                 updater << "@echo off\n";
                 updater << "timeout /t 1 /nobreak > nul\n";
                 updater << ":retry\n";
-                updater << "move /y \"" << exeName << "\" \"" << oldExeName << "\" > nul 2>&1\n";
-                updater << "copy /y \"" << newExeName << "\" \"" << exeName << "\" > nul 2>&1\n";
-                updater << "if not exist \"" << exeName << "\" (\n";
+                updater << "move /y \"" << currentExePath << "\" \"" << oldExePath << "\" > nul 2>&1\n";
+                updater << "copy /y \"" << newExePath << "\" \"" << currentExePath << "\" > nul 2>&1\n";
+                updater << "if not exist \"" << currentExePath << "\" (\n";
                 updater << "    timeout /t 1 /nobreak > nul\n";
                 updater << "    goto retry\n";
                 updater << ")\n";
-                updater << "del /f /q \"" << newExeName << "\" > nul 2>&1\n";
-                updater << "del /f /q \"" << oldExeName << "\" > nul 2>&1\n";
+                updater << "del /f /q \"" << newExePath << "\" > nul 2>&1\n";
+                updater << "del /f /q \"" << oldExePath << "\" > nul 2>&1\n";
                 updater << "start \"\" \"" << currentExePath << "\"\n";
                 updater << "del \"%~f0\"\n";
                 updater.close();
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(800)); // Let user see "restarting"
-            WinExec("cmd /c updater.bat", SW_HIDE);
+            WinExec(("cmd /c \"" + updaterBatPath + "\"").c_str(), SW_HIDE);
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
             exit(0);
         } else {
@@ -620,7 +622,7 @@ RankDisplay formatRank(int tier, int rr) {
         name = "Radiant";
     }
 
-    if (rr > 0) {
+    if (rr >= 0) {
         name += " (" + std::to_string(rr) + " RR)";
     }
     return {name};
@@ -1419,7 +1421,9 @@ void runDataPusher() {
             Log("Failed to push data: HTTP " + std::to_string(res.statusCode));
         }
         
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        for (int i = 0; i < 20 && g_running; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
 }
 
@@ -1455,7 +1459,7 @@ int main() {
     
     g_globalAgentMap = agentMap;
     g_globalMapNameMap = mapNameMap;
-    std::thread(runDataPusher).detach();
+    std::thread pusher_thread(runDataPusher);
 
     // std::cout << "Метаданные успешно загружены!\n";
 
@@ -1689,7 +1693,13 @@ int main() {
     if (polling_thread.joinable()) {
         polling_thread.join();
     }
+    if (pusher_thread.joinable()) {
+        pusher_thread.join();
+    }
     
-    if (g_hSession) { WinHttpCloseHandle(g_hSession); g_hSession = nullptr; }
+    {
+        std::lock_guard<std::mutex> lk(g_httpMutex);
+        if (g_hSession) { WinHttpCloseHandle(g_hSession); g_hSession = nullptr; }
+    }
     return 0;
 }

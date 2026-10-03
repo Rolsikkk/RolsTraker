@@ -12,11 +12,20 @@
 inline ftxui::Element renderMatchScoreboard(const std::map<std::string, std::string>& agentMap) {
     using namespace ftxui;
     
-    if (g_selectedMatchId.empty() || g_matchScoreboards.find(g_selectedMatchId) == g_matchScoreboards.end()) {
+    MatchScoreboard sb;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lk(g_mutex);
+        if (!g_selectedMatchId.empty() && g_matchScoreboards.find(g_selectedMatchId) != g_matchScoreboards.end()) {
+            sb = g_matchScoreboards[g_selectedMatchId];
+            found = true;
+        }
+    }
+
+    if (!found) {
         return vbox(text("Загрузка данных матча...") | center, text("[ ESC - Назад ]") | center) | border;
     }
 
-    auto& sb = g_matchScoreboards[g_selectedMatchId];
     std::string scoreStr = std::to_string(sb.roundsBlue) + " : " + std::to_string(sb.roundsRed);
     
     std::vector<Element> rows;
@@ -39,8 +48,11 @@ inline ftxui::Element renderMatchScoreboard(const std::map<std::string, std::str
         std::string agentName = getAgentName(p.characterId, agentMap);
 
         std::string playerName = "Player";
-        if (g_nameCache.count(p.puuid)) {
-            playerName = g_nameCache[p.puuid].first + "#" + g_nameCache[p.puuid].second;
+        {
+            std::lock_guard<std::mutex> lk(g_mutex);
+            if (g_nameCache.count(p.puuid)) {
+                playerName = g_nameCache[p.puuid].first + "#" + g_nameCache[p.puuid].second;
+            }
         }
 
         Color teamColor = (p.teamId == "Blue") ? Color::BlueLight : (p.teamId == "Red" ? Color::RedLight : Color::White);

@@ -188,6 +188,8 @@ inline ftxui::Element buildUpdateElement(const std::string& updateStatus) {
 }
 
 inline ftxui::Element renderFTXUI(const MatchState& state, const Session& session, const Lockfile& lock, const std::map<std::string, std::string>& agentMap, const std::map<std::string, std::string>& mapNameMap) {
+    g_playerBoxes.clear();
+
     // Capture update status once under the mutex to avoid races
     std::string updateStatus;
     { std::lock_guard<std::mutex> lk(g_updateMutex); updateStatus = g_updateStatus; }
@@ -252,13 +254,13 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     // Party counts & Group Assignment
     std::map<std::string, int> partyCounts;
     for (const auto& p : state.players) {
-        if (!p.partyId.empty()) partyCounts[p.partyId]++;
+        if (!p.partyId.empty() && p.partyId != "00000000-0000-0000-0000-000000000000") partyCounts[p.partyId]++;
     }
 
     std::map<std::string, PartyColorInfo> partyGroupMap;
     int nextGroupIdx = 1;
     for (const auto& p : state.players) {
-        if (!p.partyId.empty() && partyCounts[p.partyId] > 1 && partyGroupMap.find(p.partyId) == partyGroupMap.end()) {
+        if (!p.partyId.empty() && p.partyId != "00000000-0000-0000-0000-000000000000" && partyCounts[p.partyId] > 1 && partyGroupMap.find(p.partyId) == partyGroupMap.end()) {
             partyGroupMap[p.partyId] = {nextGroupIdx, "", ""}; // Name/ANSI not used here
             nextGroupIdx++;
         }
@@ -282,24 +284,34 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         } else if (p.teamId == "Blue" || p.teamId == "Attacker") {
             team2.push_back(p);
         } else {
-            if (team1.size() < 5) team1.push_back(p);
-            else team2.push_back(p);
+            team1.push_back(p);
         }
     }
 
-    auto t1 = buildTeamTable(" [КОМАНДА 1 / ЗАЩИТНИКИ (RED)]", ftxui::Color::RedLight, team1, partyGroupMap, agentMap);
-    auto t2 = buildTeamTable(" [КОМАНДА 2 / АТАКУЮЩИЕ (BLUE)]", ftxui::Color::BlueLight, team2, partyGroupMap, agentMap);
+    ftxui::Element teamsElement;
+    if (!team1.empty() && !team2.empty()) {
+        auto t1 = buildTeamTable(" [КОМАНДА 1 / ЗАЩИТНИКИ (RED)]", ftxui::Color::RedLight, team1, partyGroupMap, agentMap);
+        auto t2 = buildTeamTable(" [КОМАНДА 2 / АТАКУЮЩИЕ (BLUE)]", ftxui::Color::BlueLight, team2, partyGroupMap, agentMap);
+        teamsElement = ftxui::hbox({
+            t1 | ftxui::flex,
+            ftxui::separator(),
+            t2 | ftxui::flex
+        });
+    } else {
+        auto singleTable = buildTeamTable((state.phase == "pregame") ? " [ВАША КОМАНДА / ALLIES]" : " [ИГРОКИ]", ftxui::Color::CyanLight, team1.empty() ? team2 : team1, partyGroupMap, agentMap);
+        teamsElement = ftxui::hbox({
+            ftxui::filler() | ftxui::flex,
+            singleTable,
+            ftxui::filler() | ftxui::flex
+        });
+    }
 
     return ftxui::vbox({
         ftxui::text("ROLSTRAKER (" + CURRENT_VERSION + ")") | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
         ftxui::separator(),
         header,
         ftxui::separator(),
-        ftxui::hbox({
-            t1 | ftxui::flex,
-            ftxui::separator(),
-            t2 | ftxui::flex
-        }),
+        teamsElement,
         ftxui::separator(),
         ftxui::hbox({
             ftxui::filler() | ftxui::flex,

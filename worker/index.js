@@ -76,6 +76,16 @@ const partyColors = ["party-0", "party-1", "party-2", "party-3", "party-4", "par
 const token = "${t}";
 let lastData = null;
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 function parsePhase(p) {
     if(p === "coregame") return "<span class=\\"green\\">В ИГРЕ (Core Game)</span>";
     if(p === "pregame") return "<span class=\\"cyan\\">ВЫБОР АГЕНТА (Agent Select)</span>";
@@ -111,7 +121,7 @@ function openModal(playerIndex) {
 
     let statsHtml = \`
         <div class="stats-col">
-            <div><span style="color:#aaa;">Любимый Агент:</span> \${p.favAgent || 'N/A'}</div>
+            <div><span style="color:#aaa;">Любимый Агент:</span> \${escapeHtml(p.favAgent) || 'N/A'}</div>
             <div><span style="color:#aaa;">K/D:</span> \${p.kd >= 0 ? p.kd.toFixed(2) : 'N/A'}</div>
             <div><span style="color:#aaa;">Win %:</span> <span class="\${p.wins > p.losses ? 'won' : 'lost'}">\${winPct}</span></div>
             <div><span style="color:#aaa;">ACS:</span> \${acs}</div>
@@ -125,7 +135,7 @@ function openModal(playerIndex) {
         </div>
         <div class="stats-col" style="border-left: 1px solid #333; padding-left: 10px;">
             <div><span style="color:#aaa;">Ранги:</span></div>
-            <div><span style="color:#aaa;">Текущий:</span> <span class="cyan">\${p.rank}</span></div>
+            <div><span style="color:#aaa;">Текущий:</span> <span class="cyan">\${escapeHtml(p.rank)}</span></div>
             <div><span style="color:#aaa;">Макс:</span> \${peak}</div>
             <div style="margin-top: 10px;"><span style="color:#aaa;">W/L:</span> <span class="won">\${p.wins||0}W</span> / <span class="lost">\${p.losses||0}L</span></div>
         </div>
@@ -143,8 +153,8 @@ function openModal(playerIndex) {
             else if (q === "ggteam") q = "ЭСКАЛАЦИЯ";
             else if (q === "swiftplay") q = "БЫСТРАЯ";
             histHtml += "<tr>";
-            histHtml += "<td>" + q + "</td>";
-            histHtml += "<td>" + m.agent + "</td>";
+            histHtml += "<td>" + escapeHtml(q) + "</td>";
+            histHtml += "<td>" + escapeHtml(m.agent) + "</td>";
             histHtml += "<td>" + m.k + " / " + m.d + " / " + m.a + "</td>";
             histHtml += "<td>" + res + " (" + m.rw + " - " + m.rl + ")</td>";
             histHtml += "</tr>";
@@ -168,8 +178,8 @@ async function update(){
             return; 
         }
         
-        let mapName = data.map || "N/A";
-        let server = data.server || "N/A";
+        let mapName = escapeHtml(data.map || "N/A");
+        let server = escapeHtml(data.server || "N/A");
         
         let headerHtml = "<div class=\\"header\\"><h1>ROLSTRAKER (Live)</h1>";
         headerHtml += "<div class=\\"meta\\">Режим: " + parsePhase(data.phase) + " | Карта: <span class=\\"cyan\\">" + mapName + "</span> | Сервер: <span class=\\"cyan\\">" + server + "</span></div></div>";
@@ -204,9 +214,9 @@ async function update(){
                 let wl = (p.wins !== undefined && p.losses !== undefined) ? (p.wins + "/" + p.losses) : "N/A";
                 
                 html += "<tr onclick='openModal(" + data.players.indexOf(p) + ")'><td class=\\"party\\">" + partyStr + "</td>";
-                html += "<td>" + p.name + "</td>";
-                html += "<td>" + p.agent + "</td>";
-                html += "<td>" + p.rank + "</td>";
+                html += "<td>" + escapeHtml(p.name) + "</td>";
+                html += "<td>" + escapeHtml(p.agent) + "</td>";
+                html += "<td>" + escapeHtml(p.rank) + "</td>";
                 html += "<td>" + kd + "</td>";
                 html += "<td>" + wl + "</td></tr>";
             }
