@@ -1080,6 +1080,7 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
     {
         std::lock_guard<std::mutex> lk(g_mutex);
         if (g_statsFetching.count(puuid)) {
+            if (g_statsCache.size() > 500) g_statsCache.erase(g_statsCache.begin());
             g_statsCache[puuid] = {finalKd, hs, bs, ls, totalScore, totalRounds, matchesWon, matchesPlayed, agentPlays, recentMatches};
             g_statsFetching.erase(puuid);
         }
@@ -1135,6 +1136,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                     std::string gameName = getJsonKeyStr(item, {"GameName", "gameName"});
                     std::string tagLine = getJsonKeyStr(item, {"TagLine", "tagLine"});
                     if (gameName.empty()) gameName = "Player";
+                    if (g_nameCache.size() > 500) g_nameCache.erase(g_nameCache.begin());
                     g_nameCache[subject] = {gameName, tagLine};
                 }
             } catch (...) {}
@@ -1176,12 +1178,13 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
         if (shouldFetch) {
             std::thread([=]() {
                 auto mmrRes = httpRequest("GET", session.pdHost, 443, "/mmr/v1/players/" + p.puuid, pdHeaders, "", true, false);
+                int tier = 0;
+                int rr = 0;
+                int totalWins = 0;
+                int totalGames = 0;
+                int peakTier = 0;
+
                 if (mmrRes.statusCode == 200) {
-                    int tier = 0;
-                    int rr = 0;
-                    int totalWins = 0;
-                    int totalGames = 0;
-                    int peakTier = 0;
                     try {
                         auto j = json::parse(mmrRes.body);
 
@@ -1247,13 +1250,12 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                             }
                         }
                     } catch (...) {}
-
-                    std::lock_guard<std::mutex> lk(g_mutex);
-                    g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins, peakTier};
                 }
-                
+
                 {
                     std::lock_guard<std::mutex> lk(g_mutex);
+                    if (g_rankCache.size() > 500) g_rankCache.erase(g_rankCache.begin());
+                    g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins, peakTier};
                     g_statsFetching.erase(p.puuid + "_mmr");
                 }
             }).detach();
