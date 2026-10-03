@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.9";
+const std::string CURRENT_VERSION = "v2.4.10";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -632,13 +632,24 @@ static std::map<std::string, std::string> g_globalMapNameMap;
 static std::string g_serverRegion = "N/A";
 static std::string g_sessionToken;
 
-std::string generateRandomToken(int length = 8) {
-    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    std::mt19937 rng(std::random_device{}());
-    std::uniform_int_distribution<> dist(0, sizeof(charset) - 2);
-    std::string result;
-    for (int i = 0; i < length; i++) result += charset[dist(rng)];
-    return result;
+std::string getHWIDToken() {
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_64KEY, &hKey) == ERROR_SUCCESS) {
+        char value[256];
+        DWORD type;
+        DWORD size = sizeof(value);
+        if (RegQueryValueExA(hKey, "MachineGuid", NULL, &type, (LPBYTE)value, &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            std::string guid = value;
+            unsigned long hash = 5381;
+            for (char c : guid) hash = ((hash << 5) + hash) + c;
+            char token[16];
+            snprintf(token, sizeof(token), "%08lx", hash);
+            return std::string(token);
+        }
+        RegCloseKey(hKey);
+    }
+    return "default0";
 }
 
 struct RankDisplay {
@@ -1602,7 +1613,7 @@ void runDataPusher() {
 // -----------------------------------------------------------------------------
 int main() {
     Log("Starting main()");
-    g_sessionToken = generateRandomToken();
+    g_sessionToken = getHWIDToken();
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
     signal(SIGINT, SIG_IGN);
