@@ -1,16 +1,14 @@
-let memoryCache = {};
-const MAX_CACHE_SIZE = 100;
-
-export default {
+// index.js
+var memoryCache = {};
+var MAX_CACHE_SIZE = 100;
+var index_default = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-
     if (request.method === "POST" && url.pathname === "/api/update") {
       let t = url.searchParams.get("t");
-      if(!t) return new Response("Missing token", {status: 400});
+      if (!t) return new Response("Missing token", { status: 400 });
       const data = await request.text();
-      memoryCache[t] = { data: data, time: Date.now() };
-      // Evict oldest entries if cache grows too large
+      memoryCache[t] = { data, time: Date.now() };
       const keys = Object.keys(memoryCache);
       if (keys.length > MAX_CACHE_SIZE) {
         keys.sort((a, b) => memoryCache[a].time - memoryCache[b].time);
@@ -19,29 +17,23 @@ export default {
         }
       }
       await env.KV.put("matchState_" + t, data, { expirationTtl: 3600 });
-      return new Response(JSON.stringify({success: true}), { headers: { "Content-Type": "application/json" }});
+      return new Response(JSON.stringify({ success: true }), { headers: { "Content-Type": "application/json" } });
     }
-
     if (request.method === "GET" && url.pathname === "/api/game") {
       let t = url.searchParams.get("t");
-      if(!t) return new Response("{\"phase\":\"none\",\"players\":[]}", { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }});
-      
-      // Serve from memory if fresh (< 60 seconds) to bypass KV propagation delays
-      if (memoryCache[t] && (Date.now() - memoryCache[t].time < 60000)) {
-          return new Response(memoryCache[t].data, { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }});
+      if (!t) return new Response('{"phase":"none","players":[]}', { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
+      if (memoryCache[t] && Date.now() - memoryCache[t].time < 6e4) {
+        return new Response(memoryCache[t].data, { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
       }
-      
       const data = await env.KV.get("matchState_" + t);
       if (data) {
-          memoryCache[t] = { data: data, time: Date.now() }; // Backfill memory
+        memoryCache[t] = { data, time: Date.now() };
       }
-      return new Response(data || "{\"phase\":\"none\",\"players\":[]}", { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }});
+      return new Response(data || '{"phase":"none","players":[]}', { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
     }
-
     if (request.method === "GET" && url.pathname === "/") {
       let t = url.searchParams.get("t") || "";
-      if(!t) return new Response("Токен не указан. Откройте ссылку из программы RolsTraker.", { headers: { "Content-Type": "text/html;charset=UTF-8" }});
-
+      if (!t) return new Response("\u0422\u043E\u043A\u0435\u043D \u043D\u0435 \u0443\u043A\u0430\u0437\u0430\u043D. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u0441\u0441\u044B\u043B\u043A\u0443 \u0438\u0437 \u043F\u0440\u043E\u0433\u0440\u0430\u043C\u043C\u044B RolsTraker.", { headers: { "Content-Type": "text/html;charset=UTF-8" } });
       const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>RolsTraker Live</title>
 <style>
   body { background: #0c0c0c; color: #d4d4d4; font-family: "Consolas", "Courier New", monospace; text-align: center; margin: 0; padding: 20px; }
@@ -96,8 +88,8 @@ function escapeHtml(str) {
 }
 
 function parsePhase(p) {
-    if(p === "coregame") return "<span class=\\"green\\">В ИГРЕ (Core Game)</span>";
-    if(p === "pregame") return "<span class=\\"cyan\\">ВЫБОР АГЕНТА (Agent Select)</span>";
+    if(p === "coregame") return "<span class=\\"green\\">\u0412 \u0418\u0413\u0420\u0415 (Core Game)</span>";
+    if(p === "pregame") return "<span class=\\"cyan\\">\u0412\u042B\u0411\u041E\u0420 \u0410\u0413\u0415\u041D\u0422\u0410 (Agent Select)</span>";
     return p;
 }
 
@@ -110,7 +102,7 @@ function formatRank(tier) {
 function openModal(playerIndex) {
     if(!lastData || !lastData.players || !lastData.players[playerIndex]) return;
     let p = lastData.players[playerIndex];
-    document.getElementById("m-name").innerText = "Подробная статистика — " + p.name;
+    document.getElementById("m-name").innerText = "\u041F\u043E\u0434\u0440\u043E\u0431\u043D\u0430\u044F \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043A\u0430 \u2014 " + p.name;
     let hs = 0, bs = 0, ls = 0, acs = 0;
     let totalShots = (p.hs||0) + (p.bs||0) + (p.ls||0);
     if(totalShots > 0) {
@@ -130,37 +122,37 @@ function openModal(playerIndex) {
 
     let statsHtml = \`
         <div class="stats-col">
-            <div><span style="color:#aaa;">Любимый Агент:</span> \${escapeHtml(p.favAgent) || 'N/A'}</div>
+            <div><span style="color:#aaa;">\u041B\u044E\u0431\u0438\u043C\u044B\u0439 \u0410\u0433\u0435\u043D\u0442:</span> \${escapeHtml(p.favAgent) || 'N/A'}</div>
             <div><span style="color:#aaa;">K/D:</span> \${p.kd >= 0 ? p.kd.toFixed(2) : 'N/A'}</div>
             <div><span style="color:#aaa;">Win %:</span> <span class="\${p.wins > p.losses ? 'won' : 'lost'}">\${winPct}</span></div>
             <div><span style="color:#aaa;">ACS:</span> \${acs}</div>
-            <div><span style="color:#aaa;">Сыграно (акт):</span> \${totalMatchesRanked}</div>
+            <div><span style="color:#aaa;">\u0421\u044B\u0433\u0440\u0430\u043D\u043E (\u0430\u043A\u0442):</span> \${totalMatchesRanked}</div>
         </div>
         <div class="stats-col" style="border-left: 1px solid #333; padding-left: 10px;">
-            <div><span style="color:#aaa;">Точность стрельбы:</span></div>
-            <div><span style="color:#ff4655;">В голову (HS):</span> \${hs}%</div>
-            <div><span style="color:#d4d4d4;">В тело (BS):</span> \${bs}%</div>
-            <div><span style="color:#888;">В ноги (LS):</span> \${ls}%</div>
+            <div><span style="color:#aaa;">\u0422\u043E\u0447\u043D\u043E\u0441\u0442\u044C \u0441\u0442\u0440\u0435\u043B\u044C\u0431\u044B:</span></div>
+            <div><span style="color:#ff4655;">\u0412 \u0433\u043E\u043B\u043E\u0432\u0443 (HS):</span> \${hs}%</div>
+            <div><span style="color:#d4d4d4;">\u0412 \u0442\u0435\u043B\u043E (BS):</span> \${bs}%</div>
+            <div><span style="color:#888;">\u0412 \u043D\u043E\u0433\u0438 (LS):</span> \${ls}%</div>
         </div>
         <div class="stats-col" style="border-left: 1px solid #333; padding-left: 10px;">
-            <div><span style="color:#aaa;">Ранги:</span></div>
-            <div><span style="color:#aaa;">Текущий:</span> <span class="cyan">\${escapeHtml(p.rank)}</span></div>
-            <div><span style="color:#aaa;">Макс:</span> \${peak}</div>
+            <div><span style="color:#aaa;">\u0420\u0430\u043D\u0433\u0438:</span></div>
+            <div><span style="color:#aaa;">\u0422\u0435\u043A\u0443\u0449\u0438\u0439:</span> <span class="cyan">\${escapeHtml(p.rank)}</span></div>
+            <div><span style="color:#aaa;">\u041C\u0430\u043A\u0441:</span> \${peak}</div>
             <div style="margin-top: 10px;"><span style="color:#aaa;">W/L:</span> <span class="won">\${p.wins||0}W</span> / <span class="lost">\${p.losses||0}L</span></div>
         </div>
     \`;
     document.getElementById("m-stats").innerHTML = statsHtml;
     
-    let histHtml = "<tr><th>Режим</th><th>Агент</th><th>K/D/A</th><th>Счет</th></tr>";
+    let histHtml = "<tr><th>\u0420\u0435\u0436\u0438\u043C</th><th>\u0410\u0433\u0435\u043D\u0442</th><th>K/D/A</th><th>\u0421\u0447\u0435\u0442</th></tr>";
     if(p.recentMatches && p.recentMatches.length > 0) {
         for(let m of p.recentMatches) {
-            let res = m.won ? "<span class='won'>ПОБЕДА</span>" : "<span class='lost'>ПОРАЖЕНИЕ</span>";
+            let res = m.won ? "<span class='won'>\u041F\u041E\u0411\u0415\u0414\u0410</span>" : "<span class='lost'>\u041F\u041E\u0420\u0410\u0416\u0415\u041D\u0418\u0415</span>";
             let q = m.queue || "";
-            if (q === "competitive") q = "РЕЙТИНГ";
-            else if (q === "unrated") q = "БЕЗ РАНГА";
-            else if (q === "deathmatch") q = "ДМ";
-            else if (q === "ggteam") q = "ЭСКАЛАЦИЯ";
-            else if (q === "swiftplay") q = "БЫСТРАЯ";
+            if (q === "competitive") q = "\u0420\u0415\u0419\u0422\u0418\u041D\u0413";
+            else if (q === "unrated") q = "\u0411\u0415\u0417 \u0420\u0410\u041D\u0413\u0410";
+            else if (q === "deathmatch") q = "\u0414\u041C";
+            else if (q === "ggteam") q = "\u042D\u0421\u041A\u0410\u041B\u0410\u0426\u0418\u042F";
+            else if (q === "swiftplay") q = "\u0411\u042B\u0421\u0422\u0420\u0410\u042F";
             histHtml += "<tr>";
             histHtml += "<td>" + escapeHtml(q) + "</td>";
             histHtml += "<td>" + escapeHtml(m.agent) + "</td>";
@@ -169,7 +161,7 @@ function openModal(playerIndex) {
             histHtml += "</tr>";
         }
     } else {
-        histHtml += "<tr><td colspan='4'>Нет недавних матчей (или загружается)</td></tr>";
+        histHtml += "<tr><td colspan='4'>\u041D\u0435\u0442 \u043D\u0435\u0434\u0430\u0432\u043D\u0438\u0445 \u043C\u0430\u0442\u0447\u0435\u0439 (\u0438\u043B\u0438 \u0437\u0430\u0433\u0440\u0443\u0436\u0430\u0435\u0442\u0441\u044F)</td></tr>";
     }
     document.getElementById("m-hist").innerHTML = histHtml;
     document.getElementById("modal-overlay").style.display = "block";
@@ -183,7 +175,7 @@ async function update(){
         lastData = data;
         let content = document.getElementById("content");
         if(!data || data.phase === "none" || !data.players || data.players.length === 0){ 
-            content.innerHTML="<div class=\\"none-box\\">Режим: Вне матча (none) | Карта: N/A | Сервер: N/A</div>"; 
+            content.innerHTML="<div class=\\"none-box\\">\u0420\u0435\u0436\u0438\u043C: \u0412\u043D\u0435 \u043C\u0430\u0442\u0447\u0430 (none) | \u041A\u0430\u0440\u0442\u0430: N/A | \u0421\u0435\u0440\u0432\u0435\u0440: N/A</div>"; 
             return; 
         }
         
@@ -191,7 +183,7 @@ async function update(){
         let server = escapeHtml(data.server || "N/A");
         
         let headerHtml = "<div class=\\"header\\"><h1>ROLSTRAKER (Live)</h1>";
-        headerHtml += "<div class=\\"meta\\">Режим: " + parsePhase(data.phase) + " | Карта: <span class=\\"cyan\\">" + mapName + "</span> | Сервер: <span class=\\"cyan\\">" + server + "</span></div></div>";
+        headerHtml += "<div class=\\"meta\\">\u0420\u0435\u0436\u0438\u043C: " + parsePhase(data.phase) + " | \u041A\u0430\u0440\u0442\u0430: <span class=\\"cyan\\">" + mapName + "</span> | \u0421\u0435\u0440\u0432\u0435\u0440: <span class=\\"cyan\\">" + server + "</span></div></div>";
         
         // Calculate party indices
         let partyMap = {};
@@ -209,7 +201,7 @@ async function update(){
         function renderTeam(players, teamName, isRed) {
             let html = "<div class=\\"team " + (isRed ? "team-red" : "team-blue") + "\\">";
             if(teamName) html += "<div class=\\"team-title " + (isRed ? "red" : "blue") + "\\">" + teamName + "</div>";
-            html += "<table><tr><th class=\\"party\\">Пати</th><th>Игрок (Ник#Тег)</th><th>Агент</th><th>Ранг</th><th>K/D</th><th>W/L</th></tr>";
+            html += "<table><tr><th class=\\"party\\">\u041F\u0430\u0442\u0438</th><th>\u0418\u0433\u0440\u043E\u043A (\u041D\u0438\u043A#\u0422\u0435\u0433)</th><th>\u0410\u0433\u0435\u043D\u0442</th><th>\u0420\u0430\u043D\u0433</th><th>K/D</th><th>W/L</th></tr>";
             for(let p of players) {
                 let partyStr = "";
                 if(p.partyId && partyMap[p.partyId] && partyMap[p.partyId].idx !== -1) {
@@ -241,10 +233,10 @@ async function update(){
 
         let bodyHtml = "<div class=\\"teams-container\\">";
         if (redPlayers.length > 0) {
-            bodyHtml += renderTeam(redPlayers, "[КОМАНДА 1 / ЗАЩИТНИКИ (RED)]", true);
-            bodyHtml += renderTeam(bluePlayers, "[КОМАНДА 2 / АТАКУЮЩИЕ (BLUE)]", false);
+            bodyHtml += renderTeam(redPlayers, "[\u041A\u041E\u041C\u0410\u041D\u0414\u0410 1 / \u0417\u0410\u0429\u0418\u0422\u041D\u0418\u041A\u0418 (RED)]", true);
+            bodyHtml += renderTeam(bluePlayers, "[\u041A\u041E\u041C\u0410\u041D\u0414\u0410 2 / \u0410\u0422\u0410\u041A\u0423\u042E\u0429\u0418\u0415 (BLUE)]", false);
         } else {
-            bodyHtml += renderTeam(bluePlayers, "[ИГРОКИ]", false);
+            bodyHtml += renderTeam(bluePlayers, "[\u0418\u0413\u0420\u041E\u041A\u0418]", false);
         }
         bodyHtml += "</div>";
         
@@ -254,21 +246,24 @@ async function update(){
     }
 }
 setInterval(update, 2000); window.onload=update;
-</script></head><body>
-<div class="container" id="content"><div class="none-box">Загрузка...</div></div>
+<\/script></head><body>
+<div class="container" id="content"><div class="none-box">\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430...</div></div>
 <div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
   <div class="modal">
     <div class="modal-close" onclick="closeModal()">X</div>
     <h2 id="m-name">Player Name</h2>
     <div class="stats-grid" id="m-stats"></div>
-    <div style="font-size: 13px; color: #aaa; margin-bottom: 5px;">Последние матчи (Нажми на строку чтобы открыть):</div>
+    <div style="font-size: 13px; color: #aaa; margin-bottom: 5px;">\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u043C\u0430\u0442\u0447\u0438 (\u041D\u0430\u0436\u043C\u0438 \u043D\u0430 \u0441\u0442\u0440\u043E\u043A\u0443 \u0447\u0442\u043E\u0431\u044B \u043E\u0442\u043A\u0440\u044B\u0442\u044C):</div>
     <table id="m-hist"></table>
   </div>
 </div>
 </body></html>`;
-      return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" }});
+      return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
     }
-
     return new Response("Not found", { status: 404 });
   }
 };
+export {
+  index_default as default
+};
+//# sourceMappingURL=index.js.map

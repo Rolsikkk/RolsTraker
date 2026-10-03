@@ -29,7 +29,7 @@ extern std::string g_updateStatus;
 extern std::mutex g_updateMutex;
 
 // FTXUI colors for parties
-const std::vector<Color> FTX_PARTY_COLORS = {
+inline const std::vector<Color> FTX_PARTY_COLORS = {
     Color::Green,
     Color::Cyan,
     Color::Yellow,
