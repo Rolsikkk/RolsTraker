@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.11";
+const std::string CURRENT_VERSION = "v2.4.12";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -626,6 +626,7 @@ struct MatchState {
     std::string mapId;
     std::string mapName;
     std::vector<PlayerInfo> players;
+    bool isError = false;
 };
 
 static std::string g_publicWebUrl = "Инициализация сервера...";
@@ -1055,8 +1056,14 @@ MatchState getLiveMatchState(const Session& session, const Lockfile& lock) {
                     }
                 }
                 return state;
+            } else {
+                state.isError = true;
+                return state;
             }
         } catch (...) {}
+    } else if (corePlayerRes.statusCode != 404) {
+        state.isError = true;
+        return state;
     }
 
     // 2. Pregame check
@@ -1101,8 +1108,13 @@ MatchState getLiveMatchState(const Session& session, const Lockfile& lock) {
                     }
                 }
                 return state;
+            } else {
+                state.isError = true;
+                return state;
             }
         } catch (...) {}
+    } else if (prePlayerRes.statusCode != 404) {
+        state.isError = true;
     }
 
     return state;
@@ -1687,15 +1699,18 @@ int main() {
                 if (lock.port != 0) {
                     session = getSession(lock);
                     if (!session.accessToken.empty()) {
-                        matchState = getLiveMatchState(session, lock);
-                        if (matchState.phase != "none") {
-                            auto presencePartyMap = getPresencesPartyMap(lock);
-                            for (auto& p : matchState.players) {
-                                if (p.partyId.empty() && presencePartyMap.count(p.puuid)) {
-                                    p.partyId = presencePartyMap[p.puuid];
+                        MatchState newState = getLiveMatchState(session, lock);
+                        if (!newState.isError) {
+                            matchState = newState;
+                            if (matchState.phase != "none") {
+                                auto presencePartyMap = getPresencesPartyMap(lock);
+                                for (auto& p : matchState.players) {
+                                    if (p.partyId.empty() && presencePartyMap.count(p.puuid)) {
+                                        p.partyId = presencePartyMap[p.puuid];
+                                    }
                                 }
+                                resolveDisplayNamesAndRanks(session, matchState.players);
                             }
-                            resolveDisplayNamesAndRanks(session, matchState.players);
                         }
                     }
                 } else {
