@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.7";
+const std::string CURRENT_VERSION = "v2.4.8";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -271,7 +271,7 @@ HttpResponse httpRequest(
     if (!g_hSession) {
         std::lock_guard<std::mutex> lk(g_httpMutex);
         if (!g_hSession) {
-            g_hSession = WinHttpOpen(L"RolsTraker/1.1", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+            g_hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
             if (g_hSession) {
                 WinHttpSetTimeouts(g_hSession, 5000, 5000, 10000, 10000);
             }
@@ -720,6 +720,30 @@ Lockfile readLockfile() {
 std::string getClientVersion() {
     static std::string cachedVersion = "";
     if (!cachedVersion.empty()) return cachedVersion;
+
+    // 1. Try to read directly from ShooterGame.log (most reliable, offline)
+    std::string localAppData;
+    char* pValue;
+    size_t len;
+    if (_dupenv_s(&pValue, &len, "LOCALAPPDATA") == 0 && pValue != nullptr) {
+        localAppData = pValue;
+        free(pValue);
+        std::string logPath = localAppData + "\\VALORANT\\Saved\\Logs\\ShooterGame.log";
+        std::ifstream file(logPath);
+        if (file.is_open()) {
+            std::string line;
+            std::regex versionRegex(R"(CI server version:\s+(release-\d+\.\d+-shipping-\d+-\d+))");
+            while (std::getline(file, line)) {
+                std::smatch match;
+                if (std::regex_search(line, match, versionRegex)) {
+                    cachedVersion = match[1].str();
+                    return cachedVersion;
+                }
+            }
+        }
+    }
+
+    // 2. Fallback to valorant-api.com
     auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/version", {}, "", true, false);
     if (res.statusCode == 200) {
         try {
@@ -728,7 +752,7 @@ std::string getClientVersion() {
             return cachedVersion;
         } catch (...) {}
     }
-    return "release-09.05-shipping-15-2748173";
+    return "release-13.06-shipping-18-5590001"; // Updated Fallback
 }
 
 std::pair<std::string, std::string> readShardFromLog() {
@@ -822,30 +846,41 @@ Session getSession(const Lockfile& lock) {
 // -----------------------------------------------------------------------------
 std::map<std::string, std::string> getAgentMap() {
     std::map<std::string, std::string> agents;
-    auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/agents", {}, "", true, false);
-    if (res.statusCode == 200) {
-        try {
-            auto j = json::parse(res.body);
-            for (const auto& item : j["data"]) {
-                agents[item["uuid"].get<std::string>()] = item["displayName"].get<std::string>();
-            }
-        } catch (...) {}
+    for (int retry = 0; retry < 3; retry++) {
+        auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/agents?language=ru-RU&isPlayableCharacter=true", {}, "", true, false);
+        if (res.statusCode == 200) {
+            try {
+                auto j = json::parse(res.body);
+                for (const auto& item : j["data"]) {
+                    std::string uuid = item["uuid"].get<std::string>();
+                    // Convert UUID to lowercase just in case
+                    for (auto& c : uuid) c = tolower(c);
+                    agents[uuid] = item["displayName"].get<std::string>();
+                }
+                break;
+            } catch (...) {}
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
     return agents;
 }
 
 std::map<std::string, std::string> getMapNameMap() {
     std::map<std::string, std::string> maps;
-    auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/maps", {}, "", true, false);
-    if (res.statusCode == 200) {
-        try {
-            auto j = json::parse(res.body);
-            for (const auto& item : j["data"]) {
-                if (item.contains("mapUrl") && !item["mapUrl"].is_null()) {
-                    maps[item["mapUrl"].get<std::string>()] = item["displayName"].get<std::string>();
+    for (int retry = 0; retry < 3; retry++) {
+        auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/maps?language=ru-RU", {}, "", true, false);
+        if (res.statusCode == 200) {
+            try {
+                auto j = json::parse(res.body);
+                for (const auto& item : j["data"]) {
+                    if (item.contains("mapUrl") && !item["mapUrl"].is_null()) {
+                        maps[item["mapUrl"].get<std::string>()] = item["displayName"].get<std::string>();
+                    }
                 }
-            }
-        } catch (...) {}
+                break;
+            } catch (...) {}
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
     return maps;
 }
