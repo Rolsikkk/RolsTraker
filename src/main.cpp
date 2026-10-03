@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.3.2";
+const std::string CURRENT_VERSION = "v2.3.3";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -462,7 +462,18 @@ void checkAutoUpdate() {
 
         { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "downloading:" + latestTag; }
 
-        if (downloadFileWithRedirects(downloadUrl, "RolsTraker_new.exe")) {
+        char exePathBuf[MAX_PATH];
+        GetModuleFileNameA(NULL, exePathBuf, MAX_PATH);
+        std::string currentExePath = exePathBuf;
+        std::string exeName = "RolsTraker.exe";
+        size_t lastSlash = currentExePath.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+            exeName = currentExePath.substr(lastSlash + 1);
+        }
+        std::string newExeName = exeName + "_new";
+        std::string oldExeName = exeName + "_old";
+
+        if (downloadFileWithRedirects(downloadUrl, newExeName)) {
             { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "restarting"; }
 
             std::ofstream updater("updater.bat");
@@ -470,15 +481,15 @@ void checkAutoUpdate() {
                 updater << "@echo off\n";
                 updater << "timeout /t 1 /nobreak > nul\n";
                 updater << ":retry\n";
-                updater << "move /y RolsTraker.exe RolsTraker_old.exe > nul 2>&1\n";
-                updater << "copy /y RolsTraker_new.exe RolsTraker.exe > nul 2>&1\n";
-                updater << "if not exist RolsTraker.exe (\n";
+                updater << "move /y \"" << exeName << "\" \"" << oldExeName << "\" > nul 2>&1\n";
+                updater << "copy /y \"" << newExeName << "\" \"" << exeName << "\" > nul 2>&1\n";
+                updater << "if not exist \"" << exeName << "\" (\n";
                 updater << "    timeout /t 1 /nobreak > nul\n";
                 updater << "    goto retry\n";
                 updater << ")\n";
-                updater << "del /f /q RolsTraker_new.exe > nul 2>&1\n";
-                updater << "del /f /q RolsTraker_old.exe > nul 2>&1\n";
-                updater << "start \"\" RolsTraker.exe\n";
+                updater << "del /f /q \"" << newExeName << "\" > nul 2>&1\n";
+                updater << "del /f /q \"" << oldExeName << "\" > nul 2>&1\n";
+                updater << "start \"\" \"" << currentExePath << "\"\n";
                 updater << "del \"%~f0\"\n";
                 updater.close();
             }
@@ -1166,88 +1177,86 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
             }
         }
 
-        auto mmrRes = httpRequest("GET", session.pdHost, 443, "/mmr/v1/players/" + p.puuid, pdHeaders, "", true, false);
-        if (mmrRes.statusCode == 200) {
-            int tier = 0;
-            int rr = 0;
-            int totalWins = 0;
-            int totalGames = 0;
-            int peakTier = 0;
-            try {
-                auto j = json::parse(mmrRes.body);
+        if (!g_rankCache.count(p.puuid) && !g_statsFetching.count(p.puuid + "_mmr")) {
+            g_statsFetching.insert(p.puuid + "_mmr");
+            std::thread([=]() {
+                auto mmrRes = httpRequest("GET", session.pdHost, 443, "/mmr/v1/players/" + p.puuid, pdHeaders, "", true, false);
+                if (mmrRes.statusCode == 200) {
+                    int tier = 0;
+                    int rr = 0;
+                    int totalWins = 0;
+                    int totalGames = 0;
+                    int peakTier = 0;
+                    try {
+                        auto j = json::parse(mmrRes.body);
 
-                // Path A: LatestCompetitiveUpdate
-                if (j.contains("LatestCompetitiveUpdate") && !j["LatestCompetitiveUpdate"].is_null()) {
-                    auto lcu = j["LatestCompetitiveUpdate"];
-                    if (lcu.contains("TierAfterUpdate") && !lcu["TierAfterUpdate"].is_null()) {
-                        tier = lcu["TierAfterUpdate"].get<int>();
-                    }
-                    if (lcu.contains("RankedRatingAfterUpdate") && !lcu["RankedRatingAfterUpdate"].is_null()) {
-                        rr = lcu["RankedRatingAfterUpdate"].get<int>();
-                    }
-                }
+                        if (j.contains("LatestCompetitiveUpdate") && !j["LatestCompetitiveUpdate"].is_null()) {
+                            auto lcu = j["LatestCompetitiveUpdate"];
+                            if (lcu.contains("TierAfterUpdate") && !lcu["TierAfterUpdate"].is_null()) {
+                                tier = lcu["TierAfterUpdate"].get<int>();
+                            }
+                            if (lcu.contains("RankedRatingAfterUpdate") && !lcu["RankedRatingAfterUpdate"].is_null()) {
+                                rr = lcu["RankedRatingAfterUpdate"].get<int>();
+                            }
+                        }
 
-                // Path B: QueueSkills.competitive.SeasonalInfoBySeasonID
-                if (j.contains("QueueSkills") && j["QueueSkills"].contains("competitive")) {
-                    auto comp = j["QueueSkills"]["competitive"];
+                        if (j.contains("QueueSkills") && j["QueueSkills"].contains("competitive")) {
+                            auto comp = j["QueueSkills"]["competitive"];
 
-                    std::string latestSeasonId;
-                    if (j.contains("LatestCompetitiveUpdate") && !j["LatestCompetitiveUpdate"].is_null()) {
-                        latestSeasonId = getJsonKeyStr(j["LatestCompetitiveUpdate"], {"SeasonID"});
-                    }
+                            std::string latestSeasonId;
+                            if (j.contains("LatestCompetitiveUpdate") && !j["LatestCompetitiveUpdate"].is_null()) {
+                                latestSeasonId = getJsonKeyStr(j["LatestCompetitiveUpdate"], {"SeasonID"});
+                            }
 
-                    if (comp.contains("SeasonalInfoBySeasonID") && comp["SeasonalInfoBySeasonID"].is_object()) {
-                        auto seasons = comp["SeasonalInfoBySeasonID"];
+                            if (comp.contains("SeasonalInfoBySeasonID") && comp["SeasonalInfoBySeasonID"].is_object()) {
+                                auto seasons = comp["SeasonalInfoBySeasonID"];
 
-                        if (!latestSeasonId.empty() && seasons.contains(latestSeasonId)) {
-                            auto sData = seasons[latestSeasonId];
-                            if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
-                                int t = sData["CompetitiveTier"].get<int>();
-                                if (t > 0) {
-                                    tier = t;
-                                    if (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) {
-                                        rr = sData["RankedRating"].get<int>();
+                                if (!latestSeasonId.empty() && seasons.contains(latestSeasonId)) {
+                                    auto sData = seasons[latestSeasonId];
+                                    if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
+                                        int t = sData["CompetitiveTier"].get<int>();
+                                        if (t > 0) {
+                                            tier = t;
+                                            if (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) {
+                                                rr = sData["RankedRating"].get<int>();
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (tier == 0) {
+                                    for (const auto& [sId, sData] : seasons.items()) {
+                                        if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
+                                            int t = sData["CompetitiveTier"].get<int>();
+                                            int r = (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) ? sData["RankedRating"].get<int>() : 0;
+                                            if (t > 0) {
+                                                tier = t;
+                                                rr = r;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                for (const auto& [sId, sData] : seasons.items()) {
+                                    if (sData.contains("NumberOfGames") && sData["NumberOfGames"].is_number()) {
+                                        totalGames += sData["NumberOfGames"].get<int>();
+                                    }
+                                    if (sData.contains("NumberOfWinsWithPlacements") && sData["NumberOfWinsWithPlacements"].is_number()) {
+                                        totalWins += sData["NumberOfWinsWithPlacements"].get<int>();
+                                    }
+                                    if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
+                                        int t = sData["CompetitiveTier"].get<int>();
+                                        if (t > peakTier) peakTier = t;
                                     }
                                 }
                             }
                         }
+                    } catch (...) {}
 
-                        if (tier == 0) {
-                            for (const auto& [sId, sData] : seasons.items()) {
-                                if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
-                                    int t = sData["CompetitiveTier"].get<int>();
-                                    int r = (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) ? sData["RankedRating"].get<int>() : 0;
-                                    if (t > 0) {
-                                        tier = t;
-                                        rr = r;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Parse all-time W/L and peak rank
-                        for (const auto& [sId, sData] : seasons.items()) {
-                            if (sData.contains("NumberOfGames") && sData["NumberOfGames"].is_number()) {
-                                totalGames += sData["NumberOfGames"].get<int>();
-                            }
-                            if (sData.contains("NumberOfWinsWithPlacements") && sData["NumberOfWinsWithPlacements"].is_number()) {
-                                totalWins += sData["NumberOfWinsWithPlacements"].get<int>();
-                            }
-                            if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
-                                int t = sData["CompetitiveTier"].get<int>();
-                                if (t > peakTier) peakTier = t;
-                            }
-                        }
-                    }
+                    std::lock_guard<std::mutex> lk(g_mutex);
+                    g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins, peakTier};
                 }
-            } catch (...) {}
-
-            g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins, peakTier};
-            p.rankTier = tier;
-            p.rankRR = rr;
-            p.wins = totalWins;
-            p.losses = totalGames - totalWins;
-            p.peakRankTier = peakTier;
+            }).detach();
         }
     }
 
@@ -1367,6 +1376,18 @@ void runDataPusher() {
                     pj["totalScore"] = stats.totalScore;
                     pj["totalRounds"] = stats.totalRounds;
                     pj["matchesPlayed"] = stats.matchesPlayed;
+                    pj["peakRank"] = g_rankCache.count(p.puuid) ? g_rankCache[p.puuid].peakTier : 0;
+                    
+                    std::string favAgent = "Unknown";
+                    int maxPlays = -1;
+                    for (const auto& [agentId, plays] : stats.agentPlays) {
+                        if (plays > maxPlays) {
+                            maxPlays = plays;
+                            favAgent = g_globalAgentMap.count(agentId) ? g_globalAgentMap[agentId] : agentId;
+                        }
+                    }
+                    pj["favAgent"] = favAgent;
+
                     json rMatches = json::array();
                     for (const auto& rm : stats.recentMatches) {
                         json rj;
