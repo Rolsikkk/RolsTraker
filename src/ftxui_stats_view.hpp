@@ -36,14 +36,7 @@ inline ftxui::Element renderMatchScoreboard(const std::map<std::string, std::str
     });
 
     for (const auto& p : pms) {
-        std::string agentName = p.characterId;
-        std::string lowerId = p.characterId;
-        for(auto& c : lowerId) c = tolower(c);
-        for(const auto& [k, v] : agentMap) {
-            std::string lk = k;
-            for(auto& c : lk) c = tolower(c);
-            if (lk == lowerId) { agentName = v; break; }
-        }
+        std::string agentName = getAgentName(p.characterId, agentMap);
 
         std::string playerName = "Player";
         if (g_nameCache.count(p.puuid)) {
@@ -84,18 +77,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     for (const auto& [agentId, plays] : g_selectedPlayerInfo.agentPlays) {
         if (plays > maxPlays) {
             maxPlays = plays;
-            std::string lowerId = agentId;
-            for(auto& c : lowerId) c = tolower(c);
-            
-            favAgent = agentId;
-            for(const auto& [k, v] : agentMap) {
-                std::string lk = k;
-                for(auto& c : lk) c = tolower(c);
-                if (lk == lowerId) {
-                    favAgent = v;
-                    break;
-                }
-            }
+            favAgent = getAgentName(agentId, agentMap);
         }
     }
     
@@ -135,14 +117,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
             int matchIdx = g_statsMatchOffset + i;
             const auto& rm = g_selectedPlayerInfo.recentMatches[matchIdx];
 
-            std::string agent = rm.characterId;
-            std::string lowerId = rm.characterId;
-            for(auto& c : lowerId) c = tolower(c);
-            for(const auto& [k, v] : agentMap) {
-                std::string lk = k;
-                for(auto& c : lk) c = tolower(c);
-                if (lk == lowerId) { agent = v; break; }
-            }
+            std::string agent = getAgentName(rm.characterId, agentMap);
             if (agent.empty()) agent = "Unknown";
             
             ftxui::Color resultColor = rm.won ? Color::GreenLight : Color::RedLight;

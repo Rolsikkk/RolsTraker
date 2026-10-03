@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <sstream>
 #include <chrono>
+#include <atomic>
 
 using namespace ftxui;
 
@@ -21,7 +22,7 @@ extern PlayerInfo g_selectedPlayerInfo;
 extern std::map<std::string, ftxui::Box> g_playerBoxes;
 extern ftxui::Box g_myStatsBox;
 extern ftxui::Box g_webUrlBox;
-extern bool g_copiedLink;
+extern std::atomic<bool> g_copiedLink;
 extern int g_mouseX;
 extern int g_mouseY;
 extern std::string g_updateStatus;
@@ -56,6 +57,33 @@ struct PartyColorInfo {
     std::string name;
 };
 
+inline std::string utf8_substr(const std::string& str, size_t max_len) {
+    size_t len = 0;
+    size_t i = 0;
+    for (; i < str.length() && len < max_len; ) {
+        unsigned char c = static_cast<unsigned char>(str[i]);
+        if (c < 0x80) i += 1;
+        else if ((c & 0xE0) == 0xC0) i += 2;
+        else if ((c & 0xF0) == 0xE0) i += 3;
+        else if ((c & 0xF8) == 0xF0) i += 4;
+        else i += 1;
+        len++;
+    }
+    return str.substr(0, i);
+}
+
+inline std::string getAgentName(const std::string& characterId, const std::map<std::string, std::string>& agentMap) {
+    std::string agent = characterId;
+    std::string lowerId = characterId;
+    for (auto& c : lowerId) c = tolower(c);
+    for (const auto& [k, v] : agentMap) {
+        std::string lk = k;
+        for (auto& c : lk) c = tolower(c);
+        if (lk == lowerId) { agent = v; break; }
+    }
+    return agent;
+}
+
 inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titleColor, const std::vector<PlayerInfo>& team, const std::map<std::string, PartyColorInfo>& partyGroupMap, const std::map<std::string, std::string>& agentMap) {
     std::vector<std::vector<ftxui::Element>> rows;
     
@@ -71,14 +99,14 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
 
     for (const auto& p : team) {
         std::string fullName = p.gameName + (p.tagLine.empty() ? "" : "#" + p.tagLine);
-        if (utf8_length(fullName) > 20) fullName = fullName.substr(0, 17) + "...";
+        if (utf8_length(fullName) > 20) fullName = utf8_substr(fullName, 17) + "...";
 
-        std::string agent = agentMap.count(p.characterId) ? agentMap.at(p.characterId) : (p.characterId.empty() ? "Выбирает..." : "Агент");
-        if (utf8_length(agent) > 12) agent = agent.substr(0, 9) + "...";
+        std::string agent = p.characterId.empty() ? "Выбирает..." : getAgentName(p.characterId, agentMap);
+        if (utf8_length(agent) > 12) agent = utf8_substr(agent, 9) + "...";
 
         RankDisplay rankInfo = formatRank(p.rankTier, p.rankRR);
         std::string rankStr = rankInfo.name;
-        if (utf8_length(rankStr) > 20) rankStr = rankStr.substr(0, 17) + "...";
+        if (utf8_length(rankStr) > 20) rankStr = utf8_substr(rankStr, 17) + "...";
 
         std::string kdStr = "...";
         if (p.kdRatio == -2.0f) kdStr = "N/A";
@@ -140,6 +168,25 @@ inline ftxui::Element circleSpinner(int frame) {
     return ftxui::text(frames[idx]);
 }
 
+inline ftxui::Element buildUpdateElement(const std::string& updateStatus) {
+    std::string updateText = "";
+    Color updateColor = Color::GrayDark;
+    if (updateStatus == "checking") {
+        updateText = " Проверка обновлений... ";
+    } else if (updateStatus.size() >= 11 && updateStatus.substr(0, 11) == "downloading") {
+        std::string ver = updateStatus.size() > 12 ? updateStatus.substr(12) : "";
+        updateText = " Скачивание обновления " + ver + "... ";
+        updateColor = Color::YellowLight;
+    } else if (updateStatus == "restarting") {
+        updateText = " Перезапуск... ";
+        updateColor = Color::GreenLight;
+    }
+    
+    return updateText.empty()
+        ? ftxui::text("") 
+        : (ftxui::text(updateText) | ftxui::color(updateColor) | ftxui::center);
+}
+
 inline ftxui::Element renderFTXUI(const MatchState& state, const Session& session, const Lockfile& lock, const std::map<std::string, std::string>& agentMap, const std::map<std::string, std::string>& mapNameMap) {
     // Capture update status once under the mutex to avoid races
     std::string updateStatus;
@@ -163,23 +210,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         static auto start_time_offline = std::chrono::steady_clock::now();
         int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_offline).count() / 100;
 
-        // Update status text
-        std::string updateText = "";
-        Color updateColor = Color::GrayDark;
-        if (updateStatus == "checking") {
-            updateText = " Проверка обновлений... ";
-        } else if (updateStatus.size() >= 11 && updateStatus.substr(0, 11) == "downloading") {
-            std::string ver = updateStatus.size() > 12 ? updateStatus.substr(12) : "";
-            updateText = " Скачивание обновления " + ver + "... ";
-            updateColor = Color::YellowLight;
-        } else if (updateStatus == "restarting") {
-            updateText = " Перезапуск... ";
-            updateColor = Color::GreenLight;
-        }
-        
-        auto updateElem = updateText.empty()
-            ? ftxui::text("") 
-            : (ftxui::text(updateText) | ftxui::color(updateColor) | ftxui::center);
+        auto updateElem = buildUpdateElement(updateStatus);
 
         return ftxui::vbox({
             ftxui::filler(),
@@ -196,23 +227,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         static auto start_time_idle = std::chrono::steady_clock::now();
         int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_idle).count() / 100;
         
-        // Update status text
-        std::string updateText = "";
-        Color updateColor = Color::GrayDark;
-        if (updateStatus == "checking") {
-            updateText = " Проверка обновлений... ";
-        } else if (updateStatus.size() >= 11 && updateStatus.substr(0, 11) == "downloading") {
-            std::string ver = updateStatus.size() > 12 ? updateStatus.substr(12) : "";
-            updateText = " Скачивание обновления " + ver + "... ";
-            updateColor = Color::YellowLight;
-        } else if (updateStatus == "restarting") {
-            updateText = " Перезапуск... ";
-            updateColor = Color::GreenLight;
-        }
-        
-        auto updateElem = updateText.empty()
-            ? ftxui::text("") 
-            : (ftxui::text(updateText) | ftxui::color(updateColor) | ftxui::center);
+        auto updateElem = buildUpdateElement(updateStatus);
 
         auto myStatsBtn = ftxui::text(" пока что вы можете увидеть свою статистику ") 
                         | ftxui::bold | ftxui::color(ftxui::Color::CyanLight)

@@ -1,0 +1,7 @@
+name = "rolstraker"
+main = "index.js"
+compatibility_date = "2023-10-10"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "8b9c544677da40bab02fe39ad80064fb"

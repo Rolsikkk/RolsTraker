@@ -1,2 +1,44 @@
 Fri Oct  2 20:07:50 2026
 : Starting main()
+Fri Oct  2 21:19:15 2026
+: Starting main()
+Fri Oct  2 21:19:15 2026
+: runWebServer starting
+Fri Oct  2 21:19:15 2026
+: runCloudflaredTunnel started
+Fri Oct  2 21:19:15 2026
+: Starting listen on 127.0.0.1:18088
+Fri Oct  2 21:19:15 2026
+: Starting polling thread
+Fri Oct  2 21:19:15 2026
+: cloudflared.exe not found, downloading to C:\Users\rolsik\Desktop\ValorantPartyChecker\cloudflared.exe
+Fri Oct  2 21:19:15 2026
+: Polling thread running
+Fri Oct  2 21:20:01 2026
+: cloudflared.exe downloaded
+Fri Oct  2 21:20:01 2026
+: Starting quick tunnel
+Fri Oct  2 21:20:01 2026
+: cloudflared.exe started
+Fri Oct  2 21:20:05 2026
+: Tunnel URL found: https://exceed-pages-thin-anatomy.trycloudflare.com
+Fri Oct  2 23:29:41 2026
+: Starting main()
+Fri Oct  2 23:29:41 2026
+: runWebServer starting
+Fri Oct  2 23:29:41 2026
+: runCloudflaredTunnel started
+Fri Oct  2 23:29:41 2026
+: Starting listen on 127.0.0.1:18088
+Fri Oct  2 23:29:41 2026
+: Starting polling thread
+Fri Oct  2 23:29:41 2026
+: Starting quick tunnel
+Fri Oct  2 23:29:41 2026
+: Polling thread running
+Fri Oct  2 23:29:41 2026
+: cloudflared.exe started
+Fri Oct  2 23:29:46 2026
+: Tunnel URL found: https://second-shift-brush-experts.trycloudflare.com
+Fri Oct  2 23:30:13 2026
+: cloudflared.exe loop exited

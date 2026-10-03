@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.3.3";
+const std::string CURRENT_VERSION = "v2.3.4";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -158,7 +158,7 @@ std::string padRightUtf8(const std::string& str, size_t targetWidth) {
 static int g_statsMatchOffset = 0;
 static std::vector<ftxui::Box> g_matchBoxes;
 ftxui::Box g_webUrlBox;
-bool g_copiedLink = false;
+std::atomic<bool> g_copiedLink{false};
 
 // -----------------------------------------------------------------------------
 // Clipboard Helper
@@ -593,57 +593,37 @@ std::string generateRandomToken(int length = 8) {
 
 struct RankDisplay {
     std::string name;
-    std::string color;
 };
 
-const std::string COLOR_RED     = "\033[1;31m";
-const std::string COLOR_BLUE    = "\033[1;34m";
-const std::string COLOR_CYAN    = "\033[1;36m";
-const std::string COLOR_GREEN   = "\033[1;32m";
-const std::string COLOR_YELLOW  = "\033[1;33m";
-const std::string COLOR_MAGENTA = "\033[1;35m";
-const std::string COLOR_GRAY    = "\033[90m";
-const std::string COLOR_WHITE   = "\033[1;97m";
-
 RankDisplay formatRank(int tier, int rr) {
-    if (tier <= 2) return {"Unrated", COLOR_GRAY};
+    if (tier <= 2) return {"Unrated"};
 
     std::string name;
-    std::string color = COLOR_WHITE;
 
     if (tier >= 3 && tier <= 5) {
         name = "Iron " + std::to_string(tier - 2);
-        color = COLOR_GRAY;
     } else if (tier >= 6 && tier <= 8) {
         name = "Bronze " + std::to_string(tier - 5);
-        color = "\033[38;2;165;113;78m";
     } else if (tier >= 9 && tier <= 11) {
         name = "Silver " + std::to_string(tier - 8);
-        color = "\033[38;2;192;192;192m";
     } else if (tier >= 12 && tier <= 14) {
         name = "Gold " + std::to_string(tier - 11);
-        color = COLOR_YELLOW;
     } else if (tier >= 15 && tier <= 17) {
         name = "Platinum " + std::to_string(tier - 14);
-        color = COLOR_CYAN;
     } else if (tier >= 18 && tier <= 20) {
         name = "Diamond " + std::to_string(tier - 17);
-        color = COLOR_MAGENTA;
     } else if (tier >= 21 && tier <= 23) {
         name = "Ascendant " + std::to_string(tier - 20);
-        color = COLOR_GREEN;
     } else if (tier >= 24 && tier <= 26) {
         name = "Immortal " + std::to_string(tier - 23);
-        color = COLOR_RED;
     } else if (tier >= 27) {
         name = "Radiant";
-        color = "\033[1;93m";
     }
 
     if (rr > 0) {
         name += " (" + std::to_string(rr) + " RR)";
     }
-    return {name, color};
+    return {name};
 }
 
 // -----------------------------------------------------------------------------
@@ -693,11 +673,14 @@ Lockfile readLockfile() {
 }
 
 std::string getClientVersion() {
+    static std::string cachedVersion = "";
+    if (!cachedVersion.empty()) return cachedVersion;
     auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/version", {}, "", true, false);
     if (res.statusCode == 200) {
         try {
             auto j = json::parse(res.body);
-            return j["data"]["riotClientVersion"].get<std::string>();
+            cachedVersion = j["data"]["riotClientVersion"].get<std::string>();
+            return cachedVersion;
         } catch (...) {}
     }
     return "release-09.05-shipping-15-2748173";
@@ -712,18 +695,17 @@ std::pair<std::string, std::string> readShardFromLog() {
 
         std::ifstream file(logPath);
         if (file.is_open()) {
-            std::stringstream buffer;
-            buffer << file.rdbuf();
-            std::string content = buffer.str();
-
+            std::string line;
             std::regex re("glz-([a-zA-Z0-9]+)-1\\.([a-zA-Z0-9]+)\\.a\\.pvp\\.net", std::regex::icase);
             std::smatch match;
-            if (std::regex_search(content, match, re) && match.size() >= 3) {
-                std::string region = match[1].str();
-                std::string shard = match[2].str();
-                for (auto& c : region) c = tolower(c);
-                for (auto& c : shard) c = tolower(c);
-                return {region, shard};
+            while (std::getline(file, line)) {
+                if (std::regex_search(line, match, re) && match.size() >= 3) {
+                    std::string region = match[1].str();
+                    std::string shard = match[2].str();
+                    for (auto& c : region) c = tolower(c);
+                    for (auto& c : shard) c = tolower(c);
+                    return {region, shard};
+                }
             }
         }
     }
@@ -812,13 +794,16 @@ std::map<std::string, std::string> getMapNameMap() {
 // Live Match & Party Logic
 // -----------------------------------------------------------------------------
 std::string getClientPlatformBase64() {
+    static std::string cachedBase64 = "";
+    if (!cachedBase64.empty()) return cachedBase64;
     json j = {
         {"platformType", "PC"},
         {"platformOS", "Windows"},
         {"platformOSVersion", "10.0.19042.1.256.64bit"},
         {"platformChipset", "Unknown"}
     };
-    return base64_encode(j.dump());
+    cachedBase64 = base64_encode(j.dump());
+    return cachedBase64;
 }
 
 std::map<std::string, std::string> getPresencesPartyMap(const Lockfile& lock) {
@@ -1057,6 +1042,12 @@ void fetchPlayerStats(Session sess, std::string puuid, std::map<std::string, std
                         
                         {
                             std::lock_guard<std::mutex> lk(g_mutex);
+                            if (g_matchDetailsCache.size() > 200) {
+                                g_matchDetailsCache.erase(g_matchDetailsCache.begin());
+                            }
+                            if (g_matchScoreboards.size() > 200) {
+                                g_matchScoreboards.erase(g_matchScoreboards.begin());
+                            }
                             g_matchDetailsCache[mid] = matchStats;
                             g_matchScoreboards[mid] = sb;
                         }
@@ -1163,8 +1154,9 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
         }
     }
 
-    // 2. Resolve uncached ranks (MMR) - check cache under lock first
+    // 2. Resolve uncached ranks (MMR)
     for (auto& p : players) {
+        bool shouldFetch = false;
         {
             std::lock_guard<std::mutex> lk(g_mutex);
             if (g_rankCache.count(p.puuid)) {
@@ -1175,10 +1167,13 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                 p.peakRankTier = g_rankCache[p.puuid].peakTier;
                 continue;
             }
+            if (!g_statsFetching.count(p.puuid + "_mmr")) {
+                g_statsFetching.insert(p.puuid + "_mmr");
+                shouldFetch = true;
+            }
         }
-
-        if (!g_rankCache.count(p.puuid) && !g_statsFetching.count(p.puuid + "_mmr")) {
-            g_statsFetching.insert(p.puuid + "_mmr");
+        
+        if (shouldFetch) {
             std::thread([=]() {
                 auto mmrRes = httpRequest("GET", session.pdHost, 443, "/mmr/v1/players/" + p.puuid, pdHeaders, "", true, false);
                 if (mmrRes.statusCode == 200) {
@@ -1255,6 +1250,11 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
 
                     std::lock_guard<std::mutex> lk(g_mutex);
                     g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins, peakTier};
+                }
+                
+                {
+                    std::lock_guard<std::mutex> lk(g_mutex);
+                    g_statsFetching.erase(p.puuid + "_mmr");
                 }
             }).detach();
         }
@@ -1343,7 +1343,7 @@ void runDataPusher() {
 
     Log("Data pusher configured for host: " + host + " path: " + path);
 
-    while (true) {
+    while (g_running) {
         json j = {{"phase", "none"}, {"players", json::array()}};
         {
             std::lock_guard<std::mutex> lk(g_mutex);
