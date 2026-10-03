@@ -45,4 +45,4 @@ Ready to see your lobby stats in real-time?
 
 If you find this tool helpful, please consider leaving a star! ?
 
-[![GitHub stars](https://img.shields.io/github/stars/Rolsikkk/RolsTraker.svg?style=social&label=Star)](https://github.com/Rolsikkk/RolsTraker)
+[![Star History Chart](https://api.star-history.com/svg?repos=Rolsikkk/RolsTraker&type=Date)](https://star-history.com/#Rolsikkk/RolsTraker&Date)
