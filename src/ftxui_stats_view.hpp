@@ -209,7 +209,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
                 vbox(
                     text(" Ранги:") | bold,
                     hbox(text("Текущий: ") | color(Color::GrayLight), text(formatRank(g_selectedPlayerInfo.rankTier, g_selectedPlayerInfo.rankRR).name) | color(getRankColorFTX(g_selectedPlayerInfo.rankTier))),
-                    hbox(text("Макс:    ") | color(Color::GrayLight), text(formatRank(g_selectedPlayerInfo.peakRankTier, 0).name) | color(getRankColorFTX(g_selectedPlayerInfo.peakRankTier)))
+                    hbox(text("Макс:    ") | color(Color::GrayLight), text(formatRank(g_selectedPlayerInfo.peakRankTier, -1).name) | color(getRankColorFTX(g_selectedPlayerInfo.peakRankTier)))
                 )
             ),
             separator(),

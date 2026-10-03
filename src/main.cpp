@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.2";
+const std::string CURRENT_VERSION = "v2.4.3";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -1504,10 +1504,38 @@ int main() {
                 
                 // Keep selectedPlayerInfo updated if we are viewing it
                 if (g_currentView == AppView::PLAYER_STATS && !g_selectedPuuid.empty()) {
+                    bool foundInMatch = false;
                     for (const auto& p : matchState.players) {
                         if (p.puuid == g_selectedPuuid) {
                             g_selectedPlayerInfo = p;
+                            foundInMatch = true;
                             break;
+                        }
+                    }
+                    if (!foundInMatch) {
+                        std::lock_guard<std::mutex> lk(g_mutex);
+                        if (g_nameCache.count(g_selectedPuuid)) {
+                            g_selectedPlayerInfo.gameName = g_nameCache[g_selectedPuuid].first;
+                            g_selectedPlayerInfo.tagLine = g_nameCache[g_selectedPuuid].second;
+                        }
+                        if (g_rankCache.count(g_selectedPuuid)) {
+                            g_selectedPlayerInfo.rankTier = g_rankCache[g_selectedPuuid].tier;
+                            g_selectedPlayerInfo.rankRR = g_rankCache[g_selectedPuuid].rr;
+                            g_selectedPlayerInfo.peakRankTier = g_rankCache[g_selectedPuuid].peakTier;
+                        }
+                        if (g_statsCache.count(g_selectedPuuid)) {
+                            const auto& sc = g_statsCache[g_selectedPuuid];
+                            g_selectedPlayerInfo.kdRatio = sc.kdRatio;
+                            g_selectedPlayerInfo.headshots = sc.headshots;
+                            g_selectedPlayerInfo.bodyshots = sc.bodyshots;
+                            g_selectedPlayerInfo.legshots = sc.legshots;
+                            g_selectedPlayerInfo.totalScore = sc.totalScore;
+                            g_selectedPlayerInfo.totalRounds = sc.totalRounds;
+                            g_selectedPlayerInfo.matchesWon = sc.matchesWon;
+                            g_selectedPlayerInfo.matchesPlayed = sc.matchesPlayed;
+                            g_selectedPlayerInfo.agentPlays = sc.agentPlays;
+                            g_selectedPlayerInfo.recentMatches = sc.recentMatches;
+                            g_selectedPlayerInfo.isLoading = false;
                         }
                     }
                 }
