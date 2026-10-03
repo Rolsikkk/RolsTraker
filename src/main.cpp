@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.10";
+const std::string CURRENT_VERSION = "v2.4.11";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -272,7 +272,11 @@ HttpResponse httpRequest(
         std::lock_guard<std::mutex> lk(g_httpMutex);
         if (!g_hSession) {
             g_hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-            if (!g_hSession) {
+            if (g_hSession) {
+                DWORD dwProtocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+                WinHttpSetOption(g_hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &dwProtocols, sizeof(dwProtocols));
+                WinHttpSetTimeouts(g_hSession, 5000, 5000, 10000, 10000);
+            } else {
                 std::ofstream dbg("debug_api.txt", std::ios::app);
                 dbg << "WinHttpOpen failed, error: " << GetLastError() << "\n";
             }
@@ -870,7 +874,7 @@ Session getSession(const Lockfile& lock) {
 // -----------------------------------------------------------------------------
 std::map<std::string, std::string> getAgentMap() {
     std::map<std::string, std::string> agents;
-    for (int retry = 0; retry < 3; retry++) {
+    for (int retry = 0; retry < 1; retry++) {
         auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/agents?language=ru-RU&isPlayableCharacter=true", {}, "", true, false);
         if (res.statusCode == 200) {
             try {
@@ -922,7 +926,7 @@ std::map<std::string, std::string> getAgentMap() {
 
 std::map<std::string, std::string> getMapNameMap() {
     std::map<std::string, std::string> maps;
-    for (int retry = 0; retry < 3; retry++) {
+    for (int retry = 0; retry < 1; retry++) {
         auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/maps?language=ru-RU", {}, "", true, false);
         if (res.statusCode == 200) {
             try {
@@ -1528,6 +1532,8 @@ void runDataPusher() {
 
     Log("Data pusher configured for host: " + host + " path: " + path);
 
+    std::string lastSentData = "";
+    auto lastSendTime = std::chrono::steady_clock::now() - std::chrono::seconds(60);
     while (g_running) {
         json j = {{"phase", "none"}, {"players", json::array()}};
         {
@@ -1592,14 +1598,29 @@ void runDataPusher() {
             }
         }
         
-        std::map<std::string, std::string> headers = { 
-            {"Content-Type", "application/json"},
-            {"Connection", "close"}
-        };
-        auto res = httpRequest("POST", host, port, path, headers, j.dump(), isHttps, false);
+        std::string currentData = j.dump();
+        auto now = std::chrono::steady_clock::now();
+        bool forceSend = std::chrono::duration_cast<std::chrono::seconds>(now - lastSendTime).count() >= 10;
         
-        if (res.statusCode != 200) {
-            Log("Failed to push data: HTTP " + std::to_string(res.statusCode));
+        if (currentData != lastSentData || forceSend) {
+            std::map<std::string, std::string> headers = { 
+                {"Content-Type", "application/json"},
+                {"Connection", "close"}
+            };
+            auto res = httpRequest("POST", host, port, path, headers, currentData, isHttps, false);
+            
+            if (res.statusCode == 200) {
+                lastSentData = currentData;
+                lastSendTime = std::chrono::steady_clock::now();
+            } else if (res.statusCode == 429) {
+                Log("Rate limited (429). Backing off for 30s.");
+                for (int i = 0; i < 300 && g_running; ++i) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                continue;
+            } else {
+                Log("Failed to push data: HTTP " + std::to_string(res.statusCode));
+            }
         }
         
         for (int i = 0; i < 20 && g_running; ++i) {
