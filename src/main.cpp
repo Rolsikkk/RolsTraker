@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.6";
+const std::string CURRENT_VERSION = "v2.4.7";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -111,7 +111,7 @@ static std::mutex g_updateMutex;
 static std::mutex g_logMutex;
 
 std::string getExeDir() {
-    char buffer[MAX_PATH];
+    char buffer[MAX_PATH] = {0};
     GetModuleFileNameA(NULL, buffer, MAX_PATH);
     std::string path(buffer);
     size_t pos = path.find_last_of("\\/");
@@ -782,7 +782,15 @@ Session getSession(const Lockfile& lock) {
     }
 
     // Region & Shard
-    auto logShard = readShardFromLog();
+    static std::string cachedPid = "";
+    static std::pair<std::string, std::string> cachedShard = {"", ""};
+    
+    if (lock.pid != cachedPid || cachedShard.first.empty()) {
+        cachedPid = lock.pid;
+        cachedShard = readShardFromLog();
+    }
+    
+    auto logShard = cachedShard;
     if (!logShard.first.empty()) {
         s.region = logShard.first;
         s.shard = logShard.second;
@@ -1275,6 +1283,12 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                                             }
                                         }
                                     }
+                                    if (sData.contains("NumberOfGames") && sData["NumberOfGames"].is_number()) {
+                                        totalGames = sData["NumberOfGames"].get<int>();
+                                    }
+                                    if (sData.contains("NumberOfWinsWithPlacements") && sData["NumberOfWinsWithPlacements"].is_number()) {
+                                        totalWins = sData["NumberOfWinsWithPlacements"].get<int>();
+                                    }
                                 }
 
                                 if (tier == 0) {
@@ -1291,12 +1305,6 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                                 }
                                 
                                 for (const auto& [sId, sData] : seasons.items()) {
-                                    if (sData.contains("NumberOfGames") && sData["NumberOfGames"].is_number()) {
-                                        totalGames += sData["NumberOfGames"].get<int>();
-                                    }
-                                    if (sData.contains("NumberOfWinsWithPlacements") && sData["NumberOfWinsWithPlacements"].is_number()) {
-                                        totalWins += sData["NumberOfWinsWithPlacements"].get<int>();
-                                    }
                                     if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
                                         int t = sData["CompetitiveTier"].get<int>();
                                         if (t > peakTier) peakTier = t;
@@ -1756,7 +1764,7 @@ int main() {
                 return true;
             }
             if (event.is_mouse() && event.mouse().button == ftxui::Mouse::WheelDown) {
-                int maxOffset = std::max(0, (int)g_selectedPlayerInfo.recentMatches.size() - 8);
+                int maxOffset = std::max(0, (int)g_selectedPlayerInfo.recentMatches.size() - 6);
                 if (g_statsMatchOffset < maxOffset) g_statsMatchOffset++;
                 return true;
             }
@@ -1765,7 +1773,7 @@ int main() {
                 return true;
             }
             if (event == ftxui::Event::ArrowDown) {
-                int maxOffset = std::max(0, (int)g_selectedPlayerInfo.recentMatches.size() - 8);
+                int maxOffset = std::max(0, (int)g_selectedPlayerInfo.recentMatches.size() - 6);
                 if (g_statsMatchOffset < maxOffset) g_statsMatchOffset++;
                 return true;
             }
