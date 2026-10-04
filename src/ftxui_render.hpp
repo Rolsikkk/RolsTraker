@@ -27,6 +27,9 @@ extern int g_mouseX;
 extern int g_mouseY;
 extern std::string g_updateStatus;
 extern std::mutex g_updateMutex;
+extern std::string g_penaltiesStatus;
+extern std::mutex g_penaltiesMutex;
+extern ftxui::Box g_dodgeButtonBox;
 
 // FTXUI colors for parties
 inline const std::vector<Color> FTX_PARTY_COLORS = {
@@ -305,6 +308,8 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler() | ftxui::flex
         });
     }
+    std::string penaltiesStatus;
+    { std::lock_guard<std::mutex> lk(g_penaltiesMutex); penaltiesStatus = g_penaltiesStatus; }
 
     return ftxui::vbox({
         ftxui::text("ROLSTRAKER (" + CURRENT_VERSION + ")") | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
@@ -314,6 +319,11 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         teamsElement,
         ftxui::separator(),
         ftxui::hbox({
+            (state.phase == "pregame" ? (
+                g_dodgeButtonBox.Contain(g_mouseX, g_mouseY)
+                ? ftxui::text(" [УКЛОНИТЬСЯ (DODGE)] ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::border | ftxui::inverted | ftxui::reflect(g_dodgeButtonBox)
+                : ftxui::text(" [УКЛОНИТЬСЯ (DODGE)] ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::border | ftxui::reflect(g_dodgeButtonBox)
+            ) : ftxui::text("")),
             ftxui::filler() | ftxui::flex,
             (g_myStatsBox.Contain(g_mouseX, g_mouseY) 
                 ? ftxui::text(" [Моя статистика] ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::border | ftxui::inverted | ftxui::reflect(g_myStatsBox)
@@ -321,6 +331,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler() | ftxui::flex
         }),
         ftxui::filler() | ftxui::flex,
+        (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center : ftxui::text("")),
         webUrlElement | ftxui::center
     }) | ftxui::border;
 }

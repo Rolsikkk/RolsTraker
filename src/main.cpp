@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.14";
+const std::string CURRENT_VERSION = "v2.5.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -108,6 +108,9 @@ static std::mutex g_mutex;
 static std::atomic<bool> g_running{true};
 static std::string g_updateStatus; // "" = idle, "checking" = checking, "downloading" = downloading, "done" = restarting
 static std::mutex g_updateMutex;
+static std::string g_penaltiesStatus;
+static std::mutex g_penaltiesMutex;
+ftxui::Box g_dodgeButtonBox;
 static std::mutex g_logMutex;
 
 std::string getExeDir() {
@@ -1721,6 +1724,38 @@ int main() {
                 }
                 
                 { std::lock_guard<std::mutex> lk(g_mutex); g_liveMatchState = matchState; g_serverRegion = session.region; }
+
+                static auto lastPenaltyCheck = std::chrono::steady_clock::now() - std::chrono::seconds(60);
+                if (!session.accessToken.empty() && std::chrono::duration_cast<std::chrono::seconds>(now - lastPenaltyCheck).count() >= 60) {
+                    lastPenaltyCheck = now;
+                    std::thread([session]() {
+                        std::map<std::string, std::string> headers = {
+                            {"Authorization", "Bearer " + session.accessToken},
+                            {"X-Riot-Entitlements-JWT", session.token},
+                            {"X-Riot-ClientPlatform", getClientPlatformBase64()},
+                            {"X-Riot-ClientVersion", session.clientVersion}
+                        };
+                        auto res = httpRequest("GET", session.pdHost, 443, "/restrictions/v3/penalties", headers, "", true, false);
+                        if (res.statusCode == 200) {
+                            try {
+                                auto j = json::parse(res.body);
+                                std::string status = "";
+                                if (j.contains("Penalties") && j["Penalties"].is_array()) {
+                                    for (const auto& p : j["Penalties"]) {
+                                        std::string type = getJsonKeyStr(p, {"PenaltyType"});
+                                        if (type == "WARNING") continue;
+                                        std::string expiryStr = getJsonKeyStr(p, {"Expiry"});
+                                        if (!expiryStr.empty() && expiryStr.find('T') != std::string::npos) {
+                                            expiryStr = expiryStr.substr(0, expiryStr.find('.'));
+                                        }
+                                        status += " [ШТРАФ: " + type + " ДО " + expiryStr + " UTC] ";
+                                    }
+                                }
+                                { std::lock_guard<std::mutex> lk(g_penaltiesMutex); g_penaltiesStatus = status; }
+                            } catch (...) {}
+                        }
+                    }).detach();
+                }
                 
                 // Keep selectedPlayerInfo updated if we are viewing it
                 if (g_currentView == AppView::PLAYER_STATS && !g_selectedPuuid.empty()) {
@@ -1809,6 +1844,19 @@ int main() {
         }
 
         if (event.is_mouse() && event.mouse().button == ftxui::Mouse::Left && event.mouse().motion == ftxui::Mouse::Released) {
+            if (g_dodgeButtonBox.Contain(event.mouse().x, event.mouse().y) && matchState.phase == "pregame") {
+                std::thread([session, matchState]() {
+                    std::map<std::string, std::string> headers = {
+                        {"Authorization", "Bearer " + session.accessToken},
+                        {"X-Riot-Entitlements-JWT", session.token},
+                        {"X-Riot-ClientPlatform", getClientPlatformBase64()},
+                        {"X-Riot-ClientVersion", session.clientVersion}
+                    };
+                    httpRequest("POST", session.glzHost, 443, "/pregame/v1/matches/" + matchState.matchId + "/quit", headers, "", true, false);
+                }).detach();
+                return true;
+            }
+
             if (g_webUrlBox.Contain(event.mouse().x, event.mouse().y)) {
                 std::string webUrl;
                 { std::lock_guard<std::mutex> lk(g_webUrlMutex); webUrl = g_publicWebUrl; }
