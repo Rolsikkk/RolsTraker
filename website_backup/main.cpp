@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.5.1";
+const std::string CURRENT_VERSION = "v2.5.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -160,7 +160,8 @@ std::string padRightUtf8(const std::string& str, size_t targetWidth) {
 // -----------------------------------------------------------------------------
 static int g_statsMatchOffset = 0;
 static std::vector<ftxui::Box> g_matchBoxes;
-
+ftxui::Box g_webUrlBox;
+std::atomic<bool> g_copiedLink{false};
 
 // -----------------------------------------------------------------------------
 // Clipboard Helper
@@ -631,11 +632,33 @@ struct MatchState {
     bool isError = false;
 };
 
-
+static std::string g_publicWebUrl = "Инициализация сервера...";
+static std::mutex g_webUrlMutex;
 static MatchState g_liveMatchState;
 static std::map<std::string, std::string> g_globalAgentMap;
 static std::map<std::string, std::string> g_globalMapNameMap;
 static std::string g_serverRegion = "N/A";
+static std::string g_sessionToken;
+
+std::string getHWIDToken() {
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ | KEY_WOW64_64KEY, &hKey) == ERROR_SUCCESS) {
+        char value[256];
+        DWORD type;
+        DWORD size = sizeof(value);
+        if (RegQueryValueExA(hKey, "MachineGuid", NULL, &type, (LPBYTE)value, &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            std::string guid = value;
+            unsigned long hash = 5381;
+            for (char c : guid) hash = ((hash << 5) + hash) + c;
+            char token[16];
+            snprintf(token, sizeof(token), "%08lx", hash);
+            return std::string(token);
+        }
+        RegCloseKey(hKey);
+    }
+    return "default0";
+}
 
 struct RankDisplay {
     std::string name;
@@ -1479,14 +1502,152 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
     return FALSE;
 }
 
+void runDataPusher() {
+    Log("runDataPusher started");
+    std::string configPath = getExeDir() + "config.json";
+    std::string pushUrl = "https://rolstraker.3fun.workers.dev/api/update";
 
+    // Create or read config
+    std::ifstream cfgIn(configPath);
+    if (cfgIn.is_open()) {
+        try {
+            json c = json::parse(cfgIn);
+            if (c.contains("pushUrl")) pushUrl = c["pushUrl"];
+        } catch(...) {}
+        cfgIn.close();
+    } else {
+        std::ofstream cfgOut(configPath);
+        if (cfgOut.is_open()) {
+            json c = {{"pushUrl", pushUrl}};
+            cfgOut << c.dump(4);
+            cfgOut.close();
+        }
+    }
+
+    { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = "Загрузка..."; }
+    
+    // Extract domain, port, and path from URL
+    std::regex urlReg(R"(^(https?)://([^/:]+)(?::(\d+))?(/.*)?$)");
+    std::smatch m;
+    if (!std::regex_match(pushUrl, m, urlReg)) {
+        Log("Invalid pushUrl format");
+        return;
+    }
+    bool isHttps = (m[1] == "https");
+    std::string host = m[2];
+    int port = isHttps ? 443 : 80;
+    if (m[3].matched) port = std::stoi(m[3]);
+    std::string path = m[4].matched ? m[4].str() : "/api/update";
+    path += "?t=" + g_sessionToken;
+
+    // Set the web UI URL to just the base URL + token
+    std::string baseUrl = m[1].str() + "://" + host;
+    if (m[3].matched) baseUrl += ":" + m[3].str();
+    { std::lock_guard<std::mutex> lk(g_webUrlMutex); g_publicWebUrl = baseUrl + "/?t=" + g_sessionToken; }
+
+    Log("Data pusher configured for host: " + host + " path: " + path);
+
+    std::string lastSentData = "";
+    auto lastSendTime = std::chrono::steady_clock::now() - std::chrono::seconds(60);
+    while (g_running) {
+        json j = {{"phase", "none"}, {"players", json::array()}};
+        {
+            std::lock_guard<std::mutex> lk(g_mutex);
+            j["phase"] = g_liveMatchState.phase;
+            std::string displayMapName = g_liveMatchState.mapId;
+            if (g_globalMapNameMap.count(g_liveMatchState.mapId)) {
+                displayMapName = g_globalMapNameMap[g_liveMatchState.mapId];
+            }
+            j["map"] = displayMapName;
+            j["server"] = g_serverRegion;
+            for (const auto& p : g_liveMatchState.players) {
+                json pj; pj["team"] = p.teamId;
+                std::string fullName = p.gameName;
+                if (g_nameCache.count(p.puuid)) fullName = g_nameCache[p.puuid].first + "#" + g_nameCache[p.puuid].second;
+                pj["name"] = fullName;
+                pj["agent"] = g_globalAgentMap.count(p.characterId) ? g_globalAgentMap[p.characterId] : "Выбирает...";
+                std::string rankName = "Unrated";
+                if (g_rankCache.count(p.puuid)) rankName = formatRank(g_rankCache[p.puuid].tier, g_rankCache[p.puuid].rr).name;
+                pj["rank"] = rankName;
+                float kd = -1.0f; if (g_statsCache.count(p.puuid)) kd = g_statsCache[p.puuid].kdRatio;
+                pj["kd"] = kd;
+                pj["partyId"] = p.partyId;
+                pj["wins"] = g_rankCache.count(p.puuid) ? g_rankCache[p.puuid].wins : 0;
+                pj["losses"] = g_rankCache.count(p.puuid) ? g_rankCache[p.puuid].losses : 0;
+                if (g_statsCache.count(p.puuid)) {
+                    const auto& stats = g_statsCache[p.puuid];
+                    pj["hs"] = stats.headshots;
+                    pj["bs"] = stats.bodyshots;
+                    pj["ls"] = stats.legshots;
+                    pj["totalScore"] = stats.totalScore;
+                    pj["totalRounds"] = stats.totalRounds;
+                    pj["matchesPlayed"] = stats.matchesPlayed;
+                    pj["peakRank"] = g_rankCache.count(p.puuid) ? g_rankCache[p.puuid].peakTier : 0;
+                    
+                    std::string favAgent = "Unknown";
+                    int maxPlays = -1;
+                    for (const auto& [agentId, plays] : stats.agentPlays) {
+                        if (plays > maxPlays) {
+                            maxPlays = plays;
+                            favAgent = g_globalAgentMap.count(agentId) ? g_globalAgentMap[agentId] : agentId;
+                        }
+                    }
+                    pj["favAgent"] = favAgent;
+
+                    json rMatches = json::array();
+                    for (const auto& rm : stats.recentMatches) {
+                        json rj;
+                        rj["queue"] = rm.queueId;
+                        rj["agent"] = g_globalAgentMap.count(rm.characterId) ? g_globalAgentMap[rm.characterId] : rm.characterId;
+                        rj["k"] = rm.kills;
+                        rj["d"] = rm.deaths;
+                        rj["a"] = rm.assists;
+                        rj["won"] = rm.won;
+                        rj["rw"] = rm.roundsWon;
+                        rj["rl"] = rm.roundsLost;
+                        rMatches.push_back(rj);
+                    }
+                    pj["recentMatches"] = rMatches;
+                }
+                j["players"].push_back(pj);
+            }
+        }
+        
+        std::string currentData = j.dump();
+        auto now = std::chrono::steady_clock::now();
+        if (currentData != lastSentData) {
+            std::map<std::string, std::string> headers = { 
+                {"Content-Type", "application/json"},
+                {"Connection", "close"}
+            };
+            auto res = httpRequest("POST", host, port, path, headers, currentData, isHttps, false);
+            
+            if (res.statusCode == 200) {
+                lastSentData = currentData;
+                lastSendTime = std::chrono::steady_clock::now();
+            } else if (res.statusCode == 429) {
+                Log("Rate limited (429). Backing off for 30s.");
+                for (int i = 0; i < 300 && g_running; ++i) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                continue;
+            } else {
+                Log("Failed to push data: HTTP " + std::to_string(res.statusCode));
+            }
+        }
+        
+        for (int i = 0; i < 20 && g_running; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Main Loop
 // -----------------------------------------------------------------------------
 int main() {
     Log("Starting main()");
-
+    g_sessionToken = getHWIDToken();
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
     signal(SIGINT, SIG_IGN);
@@ -1513,7 +1674,7 @@ int main() {
     
     g_globalAgentMap = agentMap;
     g_globalMapNameMap = mapNameMap;
-
+    std::thread pusher_thread(runDataPusher);
 
     // std::cout << "Метаданные успешно загружены!\n";
 
@@ -1696,7 +1857,21 @@ int main() {
                 return true;
             }
 
-
+            if (g_webUrlBox.Contain(event.mouse().x, event.mouse().y)) {
+                std::string webUrl;
+                { std::lock_guard<std::mutex> lk(g_webUrlMutex); webUrl = g_publicWebUrl; }
+                if (webUrl.find("http") == 0) {
+                    copyToClipboard(webUrl);
+                    g_copiedLink = true;
+                    // Start a thread to reset copied status after 2 seconds
+                    std::thread([&screen]() {
+                        std::this_thread::sleep_for(std::chrono::seconds(2));
+                        g_copiedLink = false;
+                        screen.PostEvent(ftxui::Event::Custom);
+                    }).detach();
+                }
+                return true;
+            }
 
             if (g_currentView == AppView::MAIN) {
                 // Check "My Stats" button
@@ -1819,7 +1994,9 @@ int main() {
     if (polling_thread.joinable()) {
         polling_thread.join();
     }
-
+    if (pusher_thread.joinable()) {
+        pusher_thread.join();
+    }
     
     {
         std::lock_guard<std::mutex> lk(g_httpMutex);

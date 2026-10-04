@@ -16,9 +16,13 @@ using namespace ftxui;
 
 extern AppView g_currentView;
 extern std::string g_selectedPuuid;
+extern std::string g_publicWebUrl;
+extern std::mutex g_webUrlMutex;
 extern PlayerInfo g_selectedPlayerInfo;
 extern std::map<std::string, ftxui::Box> g_playerBoxes;
 extern ftxui::Box g_myStatsBox;
+extern ftxui::Box g_webUrlBox;
+extern std::atomic<bool> g_copiedLink;
 extern int g_mouseX;
 extern int g_mouseY;
 extern std::string g_updateStatus;
@@ -193,7 +197,19 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     std::string updateStatus;
     { std::lock_guard<std::mutex> lk(g_updateMutex); updateStatus = g_updateStatus; }
 
+    std::string webUrl;
+    { std::lock_guard<std::mutex> lk(g_webUrlMutex); webUrl = g_publicWebUrl; }
 
+    auto webUrlElement = ftxui::hbox({
+        ftxui::text(" Сайт: ") | ftxui::bold | ftxui::color(ftxui::Color::GrayLight),
+        ftxui::text(webUrl + (g_copiedLink ? " (Скопировано!)" : "")) 
+            | ftxui::color(g_copiedLink ? ftxui::Color::GreenLight : ftxui::Color::YellowLight) 
+            | ftxui::bold
+    }) | ftxui::reflect(g_webUrlBox);
+
+    if (g_webUrlBox.Contain(g_mouseX, g_mouseY)) {
+        webUrlElement = webUrlElement | ftxui::inverted;
+    }
 
     if (lock.port == 0) {
         static auto start_time_offline = std::chrono::steady_clock::now();
@@ -208,6 +224,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::text(" Riot Client не запущен! Ожидание запуска игры... ") | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
             updateElem,
             ftxui::filler(),
+            webUrlElement | ftxui::center
         });
     }
     
@@ -233,6 +250,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::text(" зайдите в матч чтобы увидеть информацию ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
             myStatsBtn | ftxui::center,
             ftxui::filler(),
+            webUrlElement | ftxui::center
         });
     }
 
@@ -313,6 +331,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler() | ftxui::flex
         }),
         ftxui::filler() | ftxui::flex,
-        (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center : ftxui::text(""))
+        (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center : ftxui::text("")),
+        webUrlElement | ftxui::center
     }) | ftxui::border;
 }
