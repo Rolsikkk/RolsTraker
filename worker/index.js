@@ -18,8 +18,12 @@ export default {
           delete memoryCache[keys[i]];
         }
       }
-      await env.KV.put("matchState_" + t, data, { expirationTtl: 3600 });
-      return new Response(JSON.stringify({success: true}), { headers: { "Content-Type": "application/json" }});
+      try {
+          await env.KV.put("matchState_" + t, data, { expirationTtl: 3600 });
+      } catch (e) {
+          console.error("KV put failed:", e);
+      }
+      return new Response(JSON.stringify({success: true}), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }});
     }
 
     if (request.method === "GET" && url.pathname === "/api/game") {
@@ -34,8 +38,10 @@ export default {
       const data = await env.KV.get("matchState_" + t);
       if (data) {
           memoryCache[t] = { data: data, time: Date.now() }; // Backfill memory
+          return new Response(data, { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }});
+      } else {
+          return new Response(JSON.stringify({error: "Not found"}), { status: 404, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }});
       }
-      return new Response(data || "{\"phase\":\"none\",\"players\":[]}", { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }});
     }
 
     if (request.method === "GET" && url.pathname === "/") {
@@ -179,7 +185,9 @@ window.closeModal = function() { document.getElementById("modal-overlay").style.
 async function update(){
     if (document.getElementById("modal-overlay").style.display === "block") return; // do not refresh while modal open
     try{
-        let res = await fetch("/api/game?t=" + token); let data = await res.json();
+        let res = await fetch("/api/game?t=" + token); 
+        if (!res.ok) return;
+        let data = await res.json();
         lastData = data;
         let content = document.getElementById("content");
         if(!data || data.phase === "none" || !data.players || data.players.length === 0){ 

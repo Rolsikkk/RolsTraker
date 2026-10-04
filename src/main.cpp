@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.12";
+const std::string CURRENT_VERSION = "v2.4.13";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -1691,7 +1691,12 @@ int main() {
         auto lastCheck = std::chrono::steady_clock::now() - std::chrono::seconds(10);
         while (g_running) {
             auto now = std::chrono::steady_clock::now();
-            bool timeToRefresh = std::chrono::duration_cast<std::chrono::seconds>(now - lastCheck).count() >= 3;
+            int pollInterval = 5;
+            if (matchState.phase == "coregame") pollInterval = 15;
+            else if (matchState.phase == "pregame") pollInterval = 3;
+            else pollInterval = 5;
+            
+            bool timeToRefresh = std::chrono::duration_cast<std::chrono::seconds>(now - lastCheck).count() >= pollInterval;
             
             if (timeToRefresh) {
                 lastCheck = now;
