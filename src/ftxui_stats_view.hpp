@@ -110,13 +110,13 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         text("В ноги (LS):   " + (totalShots > 0 ? lsStream.str() : "N/A")) | color(Color::GrayLight) | bold,
     });
 
+    int maxVisible = 6;
+    int totalMatches = g_selectedPlayerInfo.recentMatches.size();
+    
     std::vector<ftxui::Element> matchElems;
     if (g_selectedPlayerInfo.recentMatches.empty()) {
         matchElems.push_back(text(" Нет данных о матчах") | color(Color::GrayDark));
     } else {
-        int maxVisible = 6;
-        int totalMatches = g_selectedPlayerInfo.recentMatches.size();
-        
         // Ensure offset is valid
         if (g_statsMatchOffset > std::max(0, totalMatches - maxVisible)) {
             g_statsMatchOffset = std::max(0, totalMatches - maxVisible);
@@ -190,7 +190,28 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     int acs = g_selectedPlayerInfo.totalRounds > 0 ? g_selectedPlayerInfo.totalScore / g_selectedPlayerInfo.totalRounds : 0;
     std::string acsStr = g_selectedPlayerInfo.isLoading ? loadingStr : (g_selectedPlayerInfo.totalRounds > 0 ? std::to_string(acs) : "N/A");
 
-    auto matchHistoryBox = window(text(" Последние рейтинговые матчи (Нажми для таблицы) ") | bold | color(Color::White), vbox(matchElems));
+    auto matchesVbox = vbox(matchElems);
+    
+    ftxui::Element scrollbar = text("");
+    if (totalMatches > maxVisible) {
+        int scrollHeight = maxVisible * 3 + 1;
+        int thumbHeight = std::max(1, (int)(scrollHeight * maxVisible / totalMatches));
+        int maxOffset = std::max(0, totalMatches - maxVisible);
+        int thumbY = maxOffset == 0 ? 0 : (int)((scrollHeight - thumbHeight) * g_statsMatchOffset / maxOffset);
+        
+        std::vector<ftxui::Element> barElems;
+        for (int i = 0; i < scrollHeight; i++) {
+            if (i >= thumbY && i < thumbY + thumbHeight) {
+                barElems.push_back(text(" ") | bgcolor(Color::GrayLight));
+            } else {
+                barElems.push_back(text(" ") | bgcolor(Color::GrayDark));
+            }
+        }
+        scrollbar = vbox(barElems) | reflect(g_scrollbarBox);
+        matchesVbox = hbox(matchesVbox | flex, scrollbar);
+    }
+
+    auto matchHistoryBox = window(text(" Последние рейтинговые матчи (Нажми для таблицы) ") | bold | color(Color::White), matchesVbox);
 
     auto statsBox = window(text(" Подробная статистика (Только Рейтинг) ") | bold | color(Color::Cyan),
         vbox(
@@ -209,7 +230,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
                 vbox(
                     text(" Ранги:") | bold,
                     hbox(text("Текущий: ") | color(Color::GrayLight), text(formatRank(g_selectedPlayerInfo.rankTier, g_selectedPlayerInfo.rankRR).name) | color(getRankColorFTX(g_selectedPlayerInfo.rankTier))),
-                    hbox(text("Макс:    ") | color(Color::GrayLight), text(formatRank(g_selectedPlayerInfo.peakRankTier, -1).name) | color(getRankColorFTX(g_selectedPlayerInfo.peakRankTier)))
+                    hbox(text("Макс:    ") | color(Color::GrayLight), text(formatRank(g_selectedPlayerInfo.peakRankTier, g_selectedPlayerInfo.peakRankRR).name) | color(getRankColorFTX(g_selectedPlayerInfo.peakRankTier)))
                 )
             ),
             separator(),

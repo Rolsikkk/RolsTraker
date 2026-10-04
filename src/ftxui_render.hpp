@@ -19,6 +19,7 @@ extern std::string g_selectedPuuid;
 extern PlayerInfo g_selectedPlayerInfo;
 extern std::map<std::string, ftxui::Box> g_playerBoxes;
 extern ftxui::Box g_myStatsBox;
+extern ftxui::Box g_scrollbarBox;
 extern int g_mouseX;
 extern int g_mouseY;
 extern std::string g_updateStatus;
@@ -39,15 +40,16 @@ inline const std::vector<Color> FTX_PARTY_COLORS = {
 
 // Map Tier to FTXUI Color
 inline Color getRankColorFTX(int tier) {
-    if (tier >= 24) return Color::RedLight;      // Radiant
-    if (tier >= 21) return Color::Red;           // Immortal
-    if (tier >= 18) return Color::Magenta;       // Ascendant
-    if (tier >= 15) return Color::CyanLight;     // Diamond
-    if (tier >= 12) return Color::BlueLight;     // Platinum
-    if (tier >= 9)  return Color::YellowLight;   // Gold
-    if (tier >= 6)  return Color::GrayLight;     // Silver
-    if (tier >= 3)  return Color::Orange1;       // Bronze
-    return Color::GrayDark;                      // Iron / Unrated
+    if (tier >= 27) return Color::RGB(255, 215, 0);       // Radiant (Yellow/Gold)
+    if (tier >= 24) return Color::RGB(220, 20, 60);       // Immortal (Crimson Red)
+    if (tier >= 21) return Color::RGB(34, 139, 34);       // Ascendant (Green)
+    if (tier >= 18) return Color::RGB(147, 112, 219);     // Diamond (Purple)
+    if (tier >= 15) return Color::RGB(0, 191, 255);       // Platinum (Cyan)
+    if (tier >= 12) return Color::Yellow;                 // Gold (Yellow)
+    if (tier >= 9)  return Color::RGB(192, 192, 192);     // Silver (Silver)
+    if (tier >= 6)  return Color::RGB(156, 108, 77);      // Bronze (Brown)
+    if (tier >= 3)  return Color::GrayDark;               // Iron (Dark Gray)
+    return Color::GrayDark;                               // Unrated
 }
 
 struct PartyColorInfo {
@@ -149,8 +151,14 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
     table.SelectRow(0).BorderBottom(ftxui::DOUBLE);
     table.SelectColumn(0).BorderRight(ftxui::LIGHT);
     
+    table.SelectColumn(0).DecorateCells(ftxui::center);
+    table.SelectColumn(2).DecorateCells(ftxui::center);
+    table.SelectColumn(3).DecorateCells(ftxui::center);
+    table.SelectColumn(4).DecorateCells(ftxui::center);
+    table.SelectColumn(5).DecorateCells(ftxui::center);
+    
     return ftxui::vbox({
-        ftxui::text(title) | ftxui::color(titleColor) | ftxui::bold,
+        ftxui::text(title) | ftxui::color(titleColor) | ftxui::bold | ftxui::center,
         table.Render()
     });
 }

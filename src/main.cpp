@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.5.1";
+const std::string CURRENT_VERSION = "v2.5.2";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -98,6 +98,7 @@ struct RankCacheEntry {
     int wins = 0;
     int losses = 0;
     int peakTier = 0;
+    int peakRR = 0;
 };
 static std::map<std::string, std::pair<std::string, std::string>> g_nameCache;
 static std::map<std::string, RankCacheEntry> g_rankCache;
@@ -596,6 +597,7 @@ struct PlayerInfo {
     int rankTier = 0;
     int rankRR = 0;
     int peakRankTier = 0;
+    int peakRankRR = 0;
     float kdRatio = -1.0f;
     int wins = -1;
     int losses = -1;
@@ -619,6 +621,7 @@ static std::string g_selectedPuuid = "";
 static PlayerInfo g_selectedPlayerInfo;
 static std::map<std::string, ftxui::Box> g_playerBoxes;
 static ftxui::Box g_myStatsBox;
+static ftxui::Box g_scrollbarBox;
 static int g_mouseX = -1;
 static int g_mouseY = -1;
 
@@ -1346,6 +1349,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                 p.wins = g_rankCache[p.puuid].wins;
                 p.losses = g_rankCache[p.puuid].losses;
                 p.peakRankTier = g_rankCache[p.puuid].peakTier;
+                p.peakRankRR = g_rankCache[p.puuid].peakRR;
                 continue;
             }
             if (!g_statsFetching.count(p.puuid + "_mmr")) {
@@ -1362,6 +1366,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                 int totalWins = 0;
                 int totalGames = 0;
                 int peakTier = 0;
+                int peakRR = 0;
 
                 if (mmrRes.statusCode == 200) {
                     try {
@@ -1423,7 +1428,13 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                                 for (const auto& [sId, sData] : seasons.items()) {
                                     if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
                                         int t = sData["CompetitiveTier"].get<int>();
-                                        if (t > peakTier) peakTier = t;
+                                        if (t > peakTier) {
+                                            peakTier = t;
+                                            peakRR = (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) ? sData["RankedRating"].get<int>() : 0;
+                                        } else if (t == peakTier) {
+                                            int r = (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) ? sData["RankedRating"].get<int>() : 0;
+                                            if (r > peakRR) peakRR = r;
+                                        }
                                     }
                                 }
                             }
@@ -1434,7 +1445,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                 {
                     std::lock_guard<std::mutex> lk(g_mutex);
                     if (g_rankCache.size() > 500) g_rankCache.erase(g_rankCache.begin());
-                    g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins, peakTier};
+                    g_rankCache[p.puuid] = {tier, rr, totalWins, totalGames - totalWins, peakTier, peakRR};
                     g_statsFetching.erase(p.puuid + "_mmr");
                 }
             }).detach();
@@ -1616,6 +1627,7 @@ int main() {
                             g_selectedPlayerInfo.rankTier = g_rankCache[g_selectedPuuid].tier;
                             g_selectedPlayerInfo.rankRR = g_rankCache[g_selectedPuuid].rr;
                             g_selectedPlayerInfo.peakRankTier = g_rankCache[g_selectedPuuid].peakTier;
+                            g_selectedPlayerInfo.peakRankRR = g_rankCache[g_selectedPuuid].peakRR;
                         }
                         if (g_statsCache.count(g_selectedPuuid)) {
                             const auto& sc = g_statsCache[g_selectedPuuid];
@@ -1677,9 +1689,36 @@ int main() {
             }
         }
         
+        static bool isDraggingScrollbar = false;
+        bool is_mouse_motion = false;
         if (event.is_mouse()) {
             g_mouseX = event.mouse().x;
             g_mouseY = event.mouse().y;
+            is_mouse_motion = true;
+            
+            if (event.mouse().button == ftxui::Mouse::Left && event.mouse().motion == ftxui::Mouse::Pressed) {
+                if (g_currentView == AppView::PLAYER_STATS && g_scrollbarBox.Contain(g_mouseX, g_mouseY)) {
+                    isDraggingScrollbar = true;
+                }
+            }
+            if (event.mouse().motion == ftxui::Mouse::Released) {
+                isDraggingScrollbar = false;
+            }
+            
+            if (isDraggingScrollbar && g_currentView == AppView::PLAYER_STATS) {
+                int totalMatches = g_selectedPlayerInfo.recentMatches.size();
+                int maxOffset = std::max(0, totalMatches - 6);
+                if (maxOffset > 0) {
+                    int scrollHeight = g_scrollbarBox.y_max - g_scrollbarBox.y_min + 1;
+                    if (scrollHeight > 0) {
+                        float progress = (float)(g_mouseY - g_scrollbarBox.y_min) / scrollHeight;
+                        if (progress < 0.0f) progress = 0.0f;
+                        if (progress > 1.0f) progress = 1.0f;
+                        g_statsMatchOffset = (int)(progress * maxOffset);
+                    }
+                }
+                return true;
+            }
         }
 
         if (event.is_mouse() && event.mouse().button == ftxui::Mouse::Left && event.mouse().motion == ftxui::Mouse::Released) {
@@ -1725,6 +1764,7 @@ int main() {
                                 g_selectedPlayerInfo.rankTier = g_rankCache[session.puuid].tier;
                                 g_selectedPlayerInfo.rankRR = g_rankCache[session.puuid].rr;
                                 g_selectedPlayerInfo.peakRankTier = g_rankCache[session.puuid].peakTier;
+                                g_selectedPlayerInfo.peakRankRR = g_rankCache[session.puuid].peakRR;
                             }
                             
                             // Manually trigger stats fetch if missing
@@ -1810,7 +1850,7 @@ int main() {
                 return true;
             }
         }
-        return false;
+        return is_mouse_motion;
     });
 
     screen.Loop(renderer);
