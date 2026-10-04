@@ -32,7 +32,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.4.13";
+const std::string CURRENT_VERSION = "v2.4.14";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct RecentMatch {
@@ -1612,9 +1612,7 @@ void runDataPusher() {
         
         std::string currentData = j.dump();
         auto now = std::chrono::steady_clock::now();
-        bool forceSend = std::chrono::duration_cast<std::chrono::seconds>(now - lastSendTime).count() >= 10;
-        
-        if (currentData != lastSentData || forceSend) {
+        if (currentData != lastSentData) {
             std::map<std::string, std::string> headers = { 
                 {"Content-Type", "application/json"},
                 {"Connection", "close"}
@@ -1692,7 +1690,7 @@ int main() {
         while (g_running) {
             auto now = std::chrono::steady_clock::now();
             int pollInterval = 5;
-            if (matchState.phase == "coregame") pollInterval = 15;
+            if (matchState.phase == "coregame") pollInterval = 30;
             else if (matchState.phase == "pregame") pollInterval = 3;
             else pollInterval = 5;
             
