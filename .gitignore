@@ -2,4 +2,7 @@ build/
 *.exe
 *.obj
 *.o
+*.dll
+*.log
+*.db
 .vs/
