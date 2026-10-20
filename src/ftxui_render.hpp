@@ -14,6 +14,11 @@
 
 using namespace ftxui;
 
+enum class PlayerProfileTab { SKINS, STATS };
+extern PlayerProfileTab g_playerProfileTab;
+extern ftxui::Box g_tabSkinsBox;
+extern ftxui::Box g_tabStatsBox;
+
 extern AppView g_currentView;
 extern std::string g_selectedPuuid;
 extern PlayerInfo g_selectedPlayerInfo;
@@ -480,10 +485,11 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             })
         ) : ftxui::text("")),
         ftxui::filler() | ftxui::flex,
-        renderButton("Моя статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
+        renderButton("🎨 Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
         ftxui::filler() | ftxui::flex,
         (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) : ftxui::text(""))
     }));
+    uiElements.push_back(ftxui::text(" 💡 Нажмите на имя любого игрока, чтобы увидеть все его скины оружия ") | ftxui::color(ftxui::Color::Cyan) | ftxui::center);
 
     return ftxui::vbox(std::move(uiElements)) | ftxui::border;
 }

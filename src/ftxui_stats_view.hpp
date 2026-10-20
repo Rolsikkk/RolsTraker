@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "ftxui_render.hpp"
+#include "ftxui_skins_view.hpp"
 
 inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>& agentMap, const std::map<std::string, std::string>& mapNameMap) {
     using namespace ftxui;
@@ -107,6 +108,12 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
             nameTitle,
             filler(),
             trackerBadge
+        }),
+        separator(),
+        hbox({
+            renderProfileTabs(PlayerProfileTab::STATS),
+            filler(),
+            text(" [ 📊 БОЕВАЯ СТАТИСТИКА ] ") | bold | color(Color::GreenLight)
         }),
         separator(),
         hbox({

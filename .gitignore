@@ -5,4 +5,5 @@ build/
 *.dll
 *.log
 *.db
+weapons_cache.json
 .vs/

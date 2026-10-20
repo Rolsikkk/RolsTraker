@@ -39,7 +39,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.7.0";
+const std::string CURRENT_VERSION = "v2.8.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -1761,8 +1761,468 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
 
 #include "discord_rpc.hpp"
 #include "ftxui_render.hpp"
+#include "ftxui_skins_view.hpp"
 #include "ftxui_stats_view.hpp"
 #include "ftxui_agent_picker.hpp"
+
+PlayerProfileTab g_playerProfileTab = PlayerProfileTab::SKINS;
+ftxui::Box g_tabSkinsBox;
+ftxui::Box g_tabStatsBox;
+std::map<std::string, PlayerWeaponLoadout> g_playerLoadouts;
+std::mutex g_loadoutsMutex;
+
+struct DefaultWeaponMeta {
+    std::string uuid;
+    std::string name;
+    std::string category;
+    int catOrder;
+    int weaponOrder;
+};
+
+static const std::vector<DefaultWeaponMeta> DEFAULT_WEAPONS = {
+    {"29a0cfab-485b-f5d5-779a-b59f85e204a8", "Classic", "ПИСТОЛЕТЫ", 1, 1},
+    {"42da8ccc-40d5-affc-beec-15aa47b42eda", "Shorty", "ПИСТОЛЕТЫ", 1, 2},
+    {"44d4e95c-4157-0037-81b2-17841bf2e8e3", "Frenzy", "ПИСТОЛЕТЫ", 1, 3},
+    {"1baa85b4-4c70-1284-64bb-6481dfc3bb4e", "Ghost", "ПИСТОЛЕТЫ", 1, 4},
+    {"e336c6b8-418d-9340-d77f-7a9e4cfe0702", "Sheriff", "ПИСТОЛЕТЫ", 1, 5},
+    {"f7e1b454-4ad4-1063-ec0a-159e56b58941", "Stinger", "ПИСТОЛЕТЫ-ПУЛЕМЁТЫ", 2, 6},
+    {"462080d1-4035-2937-7c09-27aa2a5c27a7", "Spectre", "ПИСТОЛЕТЫ-ПУЛЕМЁТЫ", 2, 7},
+    {"910be174-449b-c412-ab22-d0873436b21b", "Bucky", "ДРОБОВИКИ", 3, 8},
+    {"ec845bf4-4f79-ddda-a3da-0db3774b2794", "Judge", "ДРОБОВИКИ", 3, 9},
+    {"ae3de142-4d85-2547-dd26-4e90bed35cf7", "Bulldog", "ВИНТОВКИ", 4, 10},
+    {"4ade7faa-4cf1-8376-95ef-39884480959b", "Guardian", "ВИНТОВКИ", 4, 11},
+    {"ee8e8d15-496b-07ac-e5f6-8fae5d4c7b1a", "Phantom", "ВИНТОВКИ", 4, 12},
+    {"9c82e19d-4575-0200-1a81-3eacf00cf872", "Vandal", "ВИНТОВКИ", 4, 13},
+    {"c4883e50-4494-202c-3ec3-6b8a9284f00b", "Marshal", "СНАЙПЕРСКИЕ ВИНТОВКИ", 5, 14},
+    {"5f0aaf7a-4289-3998-d5ff-eb9a5cf7ef5c", "Outlaw", "СНАЙПЕРСКИЕ ВИНТОВКИ", 5, 15},
+    {"a03b24d3-4319-996d-0f8c-94bbfba1dfc7", "Operator", "СНАЙПЕРСКИЕ ВИНТОВКИ", 5, 16},
+    {"55d8a0f4-4274-ca67-fe2c-06ab45efdf58", "Ares", "ПУЛЕМЕТЫ", 6, 17},
+    {"63e6c2b6-4a8e-869c-3d4c-e38355226584", "Odin", "ПУЛЕМЕТЫ", 6, 18},
+    {"2f59173c-4bed-b6c3-2191-dea9b58be9c7", "Нож", "ХОЛОДНОЕ ОРУЖИЕ", 7, 19}
+};
+
+struct SkinMetadata {
+    std::string skinUuid;
+    std::string skinName;
+    std::string weaponUuid;
+    bool isStandard = false;
+};
+
+struct ChromaMetadata {
+    std::string chromaUuid;
+    std::string skinUuid;
+    std::string variantName;
+};
+
+static std::map<std::string, SkinMetadata> g_skinMetaMap;
+static std::map<std::string, ChromaMetadata> g_chromaMetaMap;
+static std::map<std::string, std::string> g_weaponNameMap;
+static std::map<std::string, std::string> g_weaponCategoryMap;
+static std::mutex g_weaponDbMutex;
+static std::atomic<bool> g_weaponDbLoaded{false};
+
+static std::string extractChromaVariant(const std::string& chromaDisplayName, const std::string& skinDisplayName) {
+    if (chromaDisplayName.empty() || chromaDisplayName == skinDisplayName) return "";
+    
+    // Look for (расцветка ... "VARIANT") or ("VARIANT")
+    size_t lastQuote = chromaDisplayName.rfind('"');
+    if (lastQuote != std::string::npos && lastQuote > 0) {
+        size_t prevQuote = chromaDisplayName.rfind('"', lastQuote - 1);
+        if (prevQuote != std::string::npos && prevQuote < lastQuote) {
+            std::string variant = chromaDisplayName.substr(prevQuote + 1, lastQuote - prevQuote - 1);
+            if (variant != skinDisplayName && !variant.empty() && variant.length() < 30) {
+                return variant;
+            }
+        }
+    }
+    
+    size_t pOpen = chromaDisplayName.find('(');
+    size_t pClose = chromaDisplayName.rfind(')');
+    if (pOpen != std::string::npos && pClose != std::string::npos && pClose > pOpen) {
+        std::string inner = chromaDisplayName.substr(pOpen + 1, pClose - pOpen - 1);
+        size_t q1 = inner.find('"');
+        size_t q2 = inner.rfind('"');
+        if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
+            return inner.substr(q1 + 1, q2 - q1 - 1);
+        }
+        return inner;
+    }
+    
+    return "";
+}
+
+static void parseWeaponsJson(const std::string& jsonStr) {
+    try {
+        auto root = json::parse(jsonStr);
+        if (!root.contains("data") || !root["data"].is_array()) return;
+        
+        std::lock_guard<std::mutex> lk(g_weaponDbMutex);
+        for (const auto& w : root["data"]) {
+            std::string wUuid = getJsonKeyStr(w, {"uuid"});
+            std::string wName = getJsonKeyStr(w, {"displayName"});
+            std::string wCat = getJsonKeyStr(w, {"category"});
+            if (wUuid.empty()) continue;
+            
+            std::string catClean = "ДРУГОЕ";
+            if (wCat.find("Sidearm") != std::string::npos) catClean = "ПИСТОЛЕТЫ";
+            else if (wCat.find("SMG") != std::string::npos) catClean = "ПИСТОЛЕТЫ-ПУЛЕМЁТЫ";
+            else if (wCat.find("Shotgun") != std::string::npos) catClean = "ДРОБОВИКИ";
+            else if (wCat.find("Rifle") != std::string::npos) catClean = "ВИНТОВКИ";
+            else if (wCat.find("Sniper") != std::string::npos) catClean = "СНАЙПЕРСКИЕ ВИНТОВКИ";
+            else if (wCat.find("Heavy") != std::string::npos) catClean = "ПУЛЕМЕТЫ";
+            else if (wCat.find("Melee") != std::string::npos) catClean = "ХОЛОДНОЕ ОРУЖИЕ";
+
+            if (wCat.find("Melee") != std::string::npos && (wName == "Холодное оружие" || wName.empty())) {
+                wName = "Нож";
+            }
+
+            g_weaponNameMap[wUuid] = wName;
+            g_weaponCategoryMap[wUuid] = catClean;
+            
+            if (w.contains("skins") && w["skins"].is_array()) {
+                for (const auto& s : w["skins"]) {
+                    std::string sUuid = getJsonKeyStr(s, {"uuid"});
+                    std::string sName = getJsonKeyStr(s, {"displayName"});
+                    if (sUuid.empty()) continue;
+                    
+                    bool isStd = (sName.find("Стандарт") != std::string::npos ||
+                                  sName.find("Standard") != std::string::npos ||
+                                  sName == wName ||
+                                  sName == "Melee");
+                    
+                    SkinMetadata sm;
+                    sm.skinUuid = sUuid;
+                    sm.skinName = sName;
+                    sm.weaponUuid = wUuid;
+                    sm.isStandard = isStd;
+                    g_skinMetaMap[sUuid] = sm;
+                    
+                    if (s.contains("chromas") && s["chromas"].is_array()) {
+                        for (const auto& c : s["chromas"]) {
+                            std::string cUuid = getJsonKeyStr(c, {"uuid"});
+                            std::string cName = getJsonKeyStr(c, {"displayName"});
+                            if (cUuid.empty()) continue;
+                            
+                            ChromaMetadata cm;
+                            cm.chromaUuid = cUuid;
+                            cm.skinUuid = sUuid;
+                            cm.variantName = extractChromaVariant(cName, sName);
+                            g_chromaMetaMap[cUuid] = cm;
+                        }
+                    }
+                }
+            }
+        }
+        g_weaponDbLoaded = true;
+    } catch (...) {}
+}
+
+static void initWeaponsDatabase() {
+    std::string cachePath = getExeDir() + "/weapons_cache.json";
+    bool loadedFromDisk = false;
+    
+    std::ifstream f(cachePath);
+    if (!f.is_open()) {
+        f.open("weapons_cache.json");
+    }
+    if (f.is_open()) {
+        std::stringstream ss;
+        ss << f.rdbuf();
+        std::string content = ss.str();
+        if (content.length() > 1000) {
+            parseWeaponsJson(content);
+            loadedFromDisk = true;
+        }
+    }
+    
+    std::thread([cachePath, loadedFromDisk]() {
+        if (loadedFromDisk) {
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+        }
+        auto res = httpRequest("GET", "valorant-api.com", 443, "/v1/weapons?language=ru-RU", {}, "", true, false);
+        if (res.statusCode == 200 && res.body.length() > 1000) {
+            parseWeaponsJson(res.body);
+            std::ofstream out(cachePath, std::ios::binary);
+            if (out.is_open()) {
+                out << res.body;
+            }
+        }
+    }).detach();
+}
+
+static WeaponSkinInfo resolveWeaponSkin(const std::string& weaponUuid, const std::string& skinUuid, const std::string& chromaUuid) {
+    WeaponSkinInfo wsi;
+    wsi.weaponUuid = weaponUuid;
+    wsi.skinUuid = skinUuid;
+    wsi.chromaUuid = chromaUuid;
+
+    std::string wName = "Оружие";
+    std::string wCat = "ВИНТОВКИ";
+    int catOrd = 4;
+    int wOrd = 10;
+
+    for (const auto& dw : DEFAULT_WEAPONS) {
+        if (dw.uuid == weaponUuid) {
+            wName = dw.name;
+            wCat = dw.category;
+            catOrd = dw.catOrder;
+            wOrd = dw.weaponOrder;
+            break;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(g_weaponDbMutex);
+        if (g_weaponNameMap.count(weaponUuid)) {
+            wName = g_weaponNameMap[weaponUuid];
+        }
+        if (g_weaponCategoryMap.count(weaponUuid)) {
+            wCat = g_weaponCategoryMap[weaponUuid];
+        }
+    }
+
+    wsi.weaponName = wName;
+    wsi.category = wCat;
+    wsi.categoryOrder = catOrd;
+    wsi.weaponOrder = wOrd;
+
+    std::string sName = "";
+    bool isStd = true;
+    {
+        std::lock_guard<std::mutex> lk(g_weaponDbMutex);
+        if (g_skinMetaMap.count(skinUuid)) {
+            sName = g_skinMetaMap[skinUuid].skinName;
+            isStd = g_skinMetaMap[skinUuid].isStandard;
+        }
+    }
+
+    if (sName.empty() || isStd) {
+        wsi.skinName = "Стандартный " + wName;
+        wsi.isCustom = false;
+        wsi.fullName = wsi.skinName;
+    } else {
+        wsi.skinName = sName;
+        wsi.isCustom = true;
+        
+        std::string varName = "";
+        {
+            std::lock_guard<std::mutex> lk(g_weaponDbMutex);
+            if (g_chromaMetaMap.count(chromaUuid)) {
+                varName = g_chromaMetaMap[chromaUuid].variantName;
+            }
+        }
+        wsi.chromaName = varName;
+        if (!varName.empty()) {
+            wsi.fullName = sName + " (" + varName + ")";
+        } else {
+            wsi.fullName = sName;
+        }
+    }
+
+    return wsi;
+}
+
+static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Session& session) {
+    try {
+        auto j = json::parse(jsonBody);
+        
+        if (j.contains("Loadouts") && j["Loadouts"].is_array()) {
+            for (const auto& entry : j["Loadouts"]) {
+                std::string subject = "";
+                json jLoadout;
+                if (entry.contains("Subject") && entry["Subject"].is_string()) {
+                    subject = entry["Subject"].get<std::string>();
+                }
+                if (entry.contains("Loadout") && entry["Loadout"].is_object()) {
+                    jLoadout = entry["Loadout"];
+                    if (subject.empty() && jLoadout.contains("Subject") && jLoadout["Subject"].is_string()) {
+                        subject = jLoadout["Subject"].get<std::string>();
+                    }
+                } else {
+                    jLoadout = entry;
+                }
+                if (subject.empty()) continue;
+
+                PlayerWeaponLoadout pLoadout;
+                pLoadout.puuid = subject;
+                pLoadout.loaded = true;
+
+                for (const auto& dw : DEFAULT_WEAPONS) {
+                    WeaponSkinInfo wsi;
+                    wsi.weaponUuid = dw.uuid;
+                    wsi.weaponName = dw.name;
+                    wsi.category = dw.category;
+                    wsi.categoryOrder = dw.catOrder;
+                    wsi.weaponOrder = dw.weaponOrder;
+                    wsi.skinName = "Стандартный " + dw.name;
+                    wsi.fullName = wsi.skinName;
+                    wsi.isCustom = false;
+                    pLoadout.weapons[dw.uuid] = wsi;
+                }
+
+                if (jLoadout.contains("Items") && jLoadout["Items"].is_object()) {
+                    for (const auto& [weaponId, itemObj] : jLoadout["Items"].items()) {
+                        std::string skinId = "";
+                        std::string chromaId = "";
+                        if (itemObj.contains("Sockets") && itemObj["Sockets"].is_object()) {
+                            for (const auto& [sockKey, sockVal] : itemObj["Sockets"].items()) {
+                                std::string sId = sockKey;
+                                if (sockVal.contains("ID") && sockVal["ID"].is_string()) {
+                                    sId = sockVal["ID"].get<std::string>();
+                                }
+                                std::string itemId = "";
+                                if (sockVal.contains("Item") && sockVal["Item"].contains("ID") && sockVal["Item"]["ID"].is_string()) {
+                                    itemId = sockVal["Item"]["ID"].get<std::string>();
+                                }
+                                if (sId == "bcef87d6-209b-46c6-8b19-fbe40bd95abc" || sockKey == "bcef87d6-209b-46c6-8b19-fbe40bd95abc") {
+                                    skinId = itemId;
+                                } else if (sId == "3ad1b2b2-acdb-4524-852f-954a76ddae0a" || sockKey == "3ad1b2b2-acdb-4524-852f-954a76ddae0a") {
+                                    chromaId = itemId;
+                                }
+                            }
+                        }
+                        WeaponSkinInfo wsi = resolveWeaponSkin(weaponId, skinId, chromaId);
+                        pLoadout.weapons[weaponId] = wsi;
+                    }
+                }
+                
+                {
+                    std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+                    g_playerLoadouts[subject] = pLoadout;
+                }
+            }
+        }
+        
+        if (j.contains("Guns") && j["Guns"].is_array()) {
+            std::string subject = getJsonKeyStr(j, {"Subject", "subject"});
+            if (subject.empty()) subject = session.puuid;
+
+            PlayerWeaponLoadout pLoadout;
+            pLoadout.puuid = subject;
+            pLoadout.loaded = true;
+
+            for (const auto& dw : DEFAULT_WEAPONS) {
+                WeaponSkinInfo wsi;
+                wsi.weaponUuid = dw.uuid;
+                wsi.weaponName = dw.name;
+                wsi.category = dw.category;
+                wsi.categoryOrder = dw.catOrder;
+                wsi.weaponOrder = dw.weaponOrder;
+                wsi.skinName = "Стандартный " + dw.name;
+                wsi.fullName = wsi.skinName;
+                wsi.isCustom = false;
+                pLoadout.weapons[dw.uuid] = wsi;
+            }
+
+            for (const auto& gunObj : j["Guns"]) {
+                std::string weaponId = getJsonKeyStr(gunObj, {"ID", "id"});
+                std::string skinId = getJsonKeyStr(gunObj, {"SkinID", "skinId"});
+                std::string chromaId = getJsonKeyStr(gunObj, {"ChromaID", "chromaId"});
+                WeaponSkinInfo wsi = resolveWeaponSkin(weaponId, skinId, chromaId);
+                pLoadout.weapons[weaponId] = wsi;
+            }
+
+            {
+                std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+                g_playerLoadouts[subject] = pLoadout;
+            }
+        }
+    } catch (...) {}
+}
+
+static void fetchPlayerLoadoutDirect(const Session& session, const std::string& puuid) {
+    if (session.accessToken.empty() || puuid.empty()) return;
+    
+    bool needsFetch = false;
+    {
+        std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+        if (!g_playerLoadouts.count(puuid) || !g_playerLoadouts[puuid].loaded) {
+            needsFetch = true;
+        }
+    }
+    if (!needsFetch) return;
+
+    std::thread([session, puuid]() {
+        std::map<std::string, std::string> headers = {
+            {"Authorization", "Bearer " + session.accessToken},
+            {"X-Riot-Entitlements-JWT", session.token},
+            {"X-Riot-ClientPlatform", getClientPlatformBase64()},
+            {"X-Riot-ClientVersion", session.clientVersion}
+        };
+
+        if (puuid == session.puuid && !session.pdHost.empty()) {
+            auto res = httpRequest("GET", session.pdHost, 443, "/personalization/v2/players/" + puuid + "/playerloadout", headers, "", true, false);
+            if (res.statusCode == 200) {
+                parseMatchLoadoutsResponse(res.body, session);
+                return;
+            }
+        }
+
+        std::string matchId;
+        std::string phase;
+        {
+            std::lock_guard<std::mutex> lk(g_mutex);
+            matchId = g_liveMatchState.matchId;
+            phase = g_liveMatchState.phase;
+        }
+
+        if (!matchId.empty() && !session.glzHost.empty()) {
+            if (phase == "coregame") {
+                auto res = httpRequest("GET", session.glzHost, 443, "/core-game/v1/matches/" + matchId + "/loadouts", headers, "", true, false);
+                if (res.statusCode == 200) {
+                    parseMatchLoadoutsResponse(res.body, session);
+                    return;
+                }
+            } else if (phase == "pregame") {
+                auto res = httpRequest("GET", session.glzHost, 443, "/pregame/v1/matches/" + matchId + "/loadouts", headers, "", true, false);
+                if (res.statusCode == 200) {
+                    parseMatchLoadoutsResponse(res.body, session);
+                    return;
+                }
+            }
+        }
+    }).detach();
+}
+
+static std::string g_lastLoadedMatchId = "";
+
+static void updateMatchLoadouts(const Session& session, const MatchState& state) {
+    if (session.accessToken.empty() || state.matchId.empty()) return;
+    if (state.phase != "coregame" && state.phase != "pregame") return;
+    if (g_lastLoadedMatchId == state.matchId) return;
+
+    g_lastLoadedMatchId = state.matchId;
+    std::string matchId = state.matchId;
+    std::string phase = state.phase;
+
+    std::thread([session, matchId, phase]() {
+        std::map<std::string, std::string> headers = {
+            {"Authorization", "Bearer " + session.accessToken},
+            {"X-Riot-Entitlements-JWT", session.token},
+            {"X-Riot-ClientPlatform", getClientPlatformBase64()},
+            {"X-Riot-ClientVersion", session.clientVersion}
+        };
+
+        if (phase == "coregame" && !session.glzHost.empty()) {
+            auto res = httpRequest("GET", session.glzHost, 443, "/core-game/v1/matches/" + matchId + "/loadouts", headers, "", true, false);
+            if (res.statusCode == 200) {
+                parseMatchLoadoutsResponse(res.body, session);
+            }
+        } else if (phase == "pregame" && !session.glzHost.empty()) {
+            auto res = httpRequest("GET", session.glzHost, 443, "/pregame/v1/matches/" + matchId + "/loadouts", headers, "", true, false);
+            if (res.statusCode == 200) {
+                parseMatchLoadoutsResponse(res.body, session);
+            }
+        }
+
+        if (!session.puuid.empty() && !session.pdHost.empty()) {
+            auto res = httpRequest("GET", session.pdHost, 443, "/personalization/v2/players/" + session.puuid + "/playerloadout", headers, "", true, false);
+            if (res.statusCode == 200) {
+                parseMatchLoadoutsResponse(res.body, session);
+            }
+        }
+    }).detach();
+}
 
 bool g_showPostMatch = false;
 PostMatchInfo g_postMatchInfo;
@@ -1818,6 +2278,7 @@ int main() {
     }
 
     std::thread(checkAutoUpdate).detach();
+    initWeaponsDatabase();
 
     auto agentMap = getAgentMap();
     auto mapNameMap = getMapNameMap();
@@ -1887,6 +2348,9 @@ int main() {
                             }
                             
                             resolveDisplayNamesAndRanks(newSession, newState.players);
+                            updateMatchLoadouts(newSession, newState);
+                        } else if (!newSession.puuid.empty()) {
+                            fetchPlayerLoadoutDirect(newSession, newSession.puuid);
                         }
                     }
                 }
@@ -2110,6 +2574,30 @@ int main() {
             }
         }
         if (g_currentView == AppView::PLAYER_STATS) {
+            if (g_playerProfileTab == PlayerProfileTab::SKINS) {
+                PlayerWeaponLoadout pLoadout;
+                {
+                    std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+                    if (g_playerLoadouts.count(g_selectedPuuid)) {
+                        pLoadout = g_playerLoadouts[g_selectedPuuid];
+                    }
+                }
+                if (pLoadout.weapons.empty()) {
+                    for (const auto& dw : DEFAULT_WEAPONS) {
+                        WeaponSkinInfo wsi;
+                        wsi.weaponUuid = dw.uuid;
+                        wsi.weaponName = dw.name;
+                        wsi.category = dw.category;
+                        wsi.categoryOrder = dw.catOrder;
+                        wsi.weaponOrder = dw.weaponOrder;
+                        wsi.skinName = "Стандартный " + dw.name;
+                        wsi.fullName = wsi.skinName;
+                        wsi.isCustom = false;
+                        pLoadout.weapons[dw.uuid] = wsi;
+                    }
+                }
+                return renderPlayerSkins(pLoadout);
+            }
             return renderPlayerStats(agentMap, mapNameMap);
         }
         if (g_currentView == AppView::AGENT_PICK) {
@@ -2138,6 +2626,18 @@ int main() {
             return true;
         }
         
+        if (g_currentView == AppView::PLAYER_STATS) {
+            if (event == ftxui::Event::Character('1') || event == ftxui::Event::Character('s') || event == ftxui::Event::Character('S') || event == ftxui::Event::Character(L'ы') || event == ftxui::Event::Character(L'Ы')) {
+                g_playerProfileTab = PlayerProfileTab::SKINS;
+                fetchPlayerLoadoutDirect(session, g_selectedPuuid);
+                return true;
+            }
+            if (event == ftxui::Event::Character('2') || event == ftxui::Event::Character('t') || event == ftxui::Event::Character('T') || event == ftxui::Event::Character(L'е') || event == ftxui::Event::Character(L'Е')) {
+                g_playerProfileTab = PlayerProfileTab::STATS;
+                return true;
+            }
+        }
+
         if (event == ftxui::Event::Escape) {
             if (g_showPostMatch) {
                 g_showPostMatch = false;
@@ -2272,6 +2772,8 @@ int main() {
                         g_selectedPlayerInfo.statsSource = sc.source;
                         g_selectedPlayerInfo.isLoading = false;
                     }
+                    g_playerProfileTab = PlayerProfileTab::SKINS;
+                    fetchPlayerLoadoutDirect(session, session.puuid);
                     g_currentView = AppView::PLAYER_STATS;
                     return true;
                 }
@@ -2325,11 +2827,26 @@ int main() {
                                 break;
                             }
                         }
+                        g_playerProfileTab = PlayerProfileTab::SKINS;
+                        fetchPlayerLoadoutDirect(session, puuid);
                         g_currentView = AppView::PLAYER_STATS;
                         return true;
                     }
                 }
             } else if (g_currentView == AppView::PLAYER_STATS) {
+                if (g_tabSkinsBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "tab_skins";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    g_playerProfileTab = PlayerProfileTab::SKINS;
+                    fetchPlayerLoadoutDirect(session, g_selectedPuuid);
+                    return true;
+                }
+                if (g_tabStatsBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "tab_stats";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    g_playerProfileTab = PlayerProfileTab::STATS;
+                    return true;
+                }
                 if (g_backButtonBox.Contain(event.mouse().x, event.mouse().y)) {
                     g_activeButton = "back";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();

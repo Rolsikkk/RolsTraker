@@ -15,6 +15,7 @@
 A lightning-fast, portable, terminal-based **Valorant stats tracker and lobby companion** built in C++20 with [FTXUI](https://github.com/ArthurSonzogni/FTXUI). It automatically detects your live lobby, displays detailed player stats directly from Tracker.gg, shows the selected map, and provides an instant one-click agent auto-picker!
 
 ### ✨ Key Features
+- 🎨 **In-Game Weapon Skins Inspection**: Click on any player in the lobby to see their complete weapon loadout! All 19 weapons are neatly categorized into *Sidearms, SMGs, Shotguns, Rifles, Snipers, Heavies, Melee* exactly like in the in-game Valorant Arsenal, complete with chroma variants and custom skin highlights (`★`).
 - ⚡ **Instant Agent Auto-Picker**: Pick and lock any unlocked agent in seconds! Browse agents by roles (*Duelists, Initiators, Controllers, Sentinels*) or press `[P]` / click the picker button during Agent Select.
 - 🗺️ **Map Detection & Banner**: Clearly displays the current map prominently as soon as the pre-game lobby is generated.
 - 📊 **Tracker.gg Stats Integration**: View accurate K/D, Headshot %, ACS, Winrate, and competitive ranks for all players in the lobby (with clean handling for private profiles).
@@ -43,6 +44,7 @@ A lightning-fast, portable, terminal-based **Valorant stats tracker and lobby co
 Молниеносный, автономный консольный **трекер статистики и помощник для Valorant**, написанный на C++20 с использованием библиотеки [FTXUI](https://github.com/ArthurSonzogni/FTXUI). Автоматически определяет лобби, загружает актуальную статистику игроков с Tracker.gg, отображает выпавшую карту и позволяет мгновенно выбирать (авто-пикать) агентов в один клик.
 
 ### ✨ Основные возможности
+- 🎨 **Просмотр скинов оружия игроков в матче**: Нажмите на имя любого игрока в лобби, чтобы увидеть его полный экипированный арсенал оружия! Все 19 видов оружия аккуратно рассортированы по категориям (*Пистолеты, Пистолеты-пулемёты, Дробовики, Винтовки, Снайперские винтовки, Пулемёты, Холодное оружие*) точно так же, как в меню «Коллекция» в самом Валоранте, с отображением расцветок (хромов) и подсветкой особых скинов (`★`).
 - ⚡ **Мгновенный авто-пик агентов**: Выбирайте и фиксируйте любого доступного агента за долю секунды! Удобная сортировка по ролям (*Дуэлянты, Зачинщики, Специалисты, Стражи*), открытие по кнопке или горячей клавише `[P]`.
 - 🗺️ **Баннер карты в Pre-Game**: Крупное и четкое отображение выпавшей карты сразу после нахождения матча.
 - 📊 **Статистика Tracker.gg**: Актуальные показатели K/D, % попаданий в голову (HS%), ACS, процент побед и текущий ранг для всех участников матча (с понятной плашкой «Закрыт» для приватных профилей).
