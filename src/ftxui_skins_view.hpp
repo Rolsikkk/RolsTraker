@@ -38,28 +38,46 @@ extern ftxui::Box g_tabStatsBox;
 
 inline ftxui::Element renderProfileTabs(PlayerProfileTab currentTab) {
     using namespace ftxui;
-    Color skinsCol = (currentTab == PlayerProfileTab::SKINS) ? Color::CyanLight : Color::GrayLight;
-    Color statsCol = (currentTab == PlayerProfileTab::STATS) ? Color::CyanLight : Color::GrayLight;
     
-    auto skinsBtn = renderButton(" 🎨 СКИНЫ ОРУЖИЯ (1/S) ", g_tabSkinsBox, skinsCol, "tab_skins", g_mousePressed && currentTab == PlayerProfileTab::SKINS) | reflect(g_tabSkinsBox);
-    auto statsBtn = renderButton(" 📊 СТАТИСТИКА БОЯ (2/T) ", g_tabStatsBox, statsCol, "tab_stats", g_mousePressed && currentTab == PlayerProfileTab::STATS) | reflect(g_tabStatsBox);
-    
+    Element skinsBtn;
     if (currentTab == PlayerProfileTab::SKINS) {
-        skinsBtn = skinsBtn | bold;
+        skinsBtn = hbox({
+            text(" [ * СКИНЫ ОРУЖИЯ (1/S) ] ") | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 60))
+        }) | borderHeavy | reflect(g_tabSkinsBox);
     } else {
-        statsBtn = statsBtn | bold;
+        skinsBtn = hbox({
+            text(" [   СКИНЫ ОРУЖИЯ (1/S) ] ") | color(Color::GrayLight)
+        }) | border | reflect(g_tabSkinsBox);
+    }
+
+    Element statsBtn;
+    if (currentTab == PlayerProfileTab::STATS) {
+        statsBtn = hbox({
+            text(" [ * СТАТИСТИКА БОЯ (2/T) ] ") | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 60))
+        }) | borderHeavy | reflect(g_tabStatsBox);
+    } else {
+        statsBtn = hbox({
+            text(" [   СТАТИСТИКА БОЯ (2/T) ] ") | color(Color::GrayLight)
+        }) | border | reflect(g_tabStatsBox);
     }
 
     return hbox({
         skinsBtn,
-        text("  "),
+        text(" "),
         statsBtn
     });
 }
 
-inline ftxui::Element renderCategoryWeaponList(const std::string& title, ftxui::Color titleColor, const std::vector<WeaponSkinInfo>& weapons) {
+inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Color titleColor, const std::vector<WeaponSkinInfo>& weapons) {
     using namespace ftxui;
     Elements rows;
+
+    rows.push_back(
+        hbox({
+            text("── " + title + " ") | color(titleColor) | bold,
+            separator() | color(Color::RGB(55, 65, 75))
+        })
+    );
 
     for (const auto& w : weapons) {
         Color nameColor = w.isCustom ? Color::CyanLight : Color::GrayLight;
@@ -70,12 +88,11 @@ inline ftxui::Element renderCategoryWeaponList(const std::string& title, ftxui::
             dispSkin = "Стандартный " + w.weaponName;
         }
 
-        // Clean newline characters in case of multi-line API responses
         std::replace(dispSkin.begin(), dispSkin.end(), '\n', ' ');
 
-        // Safe truncation to keep width compact and responsive
-        if (dispSkin.length() > 36) {
-            dispSkin = utf8_substr(dispSkin, 34) + "..";
+        // Safe truncation to keep width compact
+        if (dispSkin.length() > 32) {
+            dispSkin = utf8_substr(dispSkin, 30) + "..";
         }
 
         Element starIcon = w.isCustom ? (text("★ ") | color(Color::Gold1) | bold) : (text("· ") | color(Color::GrayDark));
@@ -83,21 +100,14 @@ inline ftxui::Element renderCategoryWeaponList(const std::string& title, ftxui::
         if (w.isCustom) skinText = skinText | bold;
 
         Element row = hbox({
-            text(" " + w.weaponName) | color(nameColor) | bold | size(WIDTH, EQUAL, 12),
+            text(" " + w.weaponName) | color(nameColor) | bold | size(WIDTH, EQUAL, 10),
             starIcon,
             skinText | flex
         });
         rows.push_back(row);
     }
 
-    return vbox({
-        hbox({
-            text(" " + title + " ") | color(titleColor) | bold,
-            filler()
-        }),
-        separator(),
-        vbox(rows)
-    }) | border;
+    return vbox(std::move(rows));
 }
 
 inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
@@ -108,7 +118,7 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     std::string fullName = g_selectedPlayerInfo.gameName + (g_selectedPlayerInfo.tagLine.empty() ? "" : "#" + g_selectedPlayerInfo.tagLine);
     ftxui::Element nameTitle = text(fullName) | bold | color(Color::White);
     if (g_selectedPlayerInfo.isMuted) {
-        nameTitle = hbox(nameTitle, text(" [ В МУТЕ ]") | color(Color::RedLight) | bold);
+        nameTitle = hbox(nameTitle, text(" [В МУТЕ]") | color(Color::RedLight) | bold);
     }
 
     std::string pStatus;
@@ -161,23 +171,28 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     if (!loadout.loaded && loadout.weapons.empty()) {
         skinsBody = vbox({
             text(""),
-            text(" ⏳ Получение данных об экипированных скинах из матча... ") | color(Color::CyanLight) | bold | center,
+            text(" Получение данных об экипированных скинах из матча... ") | color(Color::CyanLight) | bold | center,
             text(" (Скины считываются из активного лобби Riot Client API) ") | color(Color::GrayLight) | center,
             text("")
         }) | border;
     } else {
         auto leftCol = vbox({
-            renderCategoryWeaponList("🔫 ПИСТОЛЕТЫ", Color::Cyan, sidearms),
-            renderCategoryWeaponList("⚡ ПИСТОЛЕТЫ-ПУЛЕМЁТЫ", Color::MagentaLight, smgs),
-            renderCategoryWeaponList("💥 ДРОБОВИКИ", Color::RedLight, shotguns),
-        }) | flex;
+            renderCategorySection("ПИСТОЛЕТЫ", Color::Cyan, sidearms),
+            text(""),
+            renderCategorySection("ПИСТОЛЕТЫ-ПУЛЕМЁТЫ", Color::MagentaLight, smgs),
+            text(""),
+            renderCategorySection("ДРОБОВИКИ", Color::RedLight, shotguns),
+        }) | border | flex;
 
         auto rightCol = vbox({
-            renderCategoryWeaponList("🎯 ВИНТОВКИ", Color::GreenLight, rifles),
-            renderCategoryWeaponList("🔭 СНАЙПЕРСКИЕ ВИНТОВКИ", Color::BlueLight, snipers),
-            renderCategoryWeaponList("🛡️ ПУЛЕМЕТЫ", Color::Yellow, heavies),
-            renderCategoryWeaponList("🗡️ ХОЛОДНОЕ ОРУЖИЕ", Color::Gold1, melee),
-        }) | flex;
+            renderCategorySection("ВИНТОВКИ", Color::GreenLight, rifles),
+            text(""),
+            renderCategorySection("СНАЙПЕРСКИЕ ВИНТОВКИ", Color::BlueLight, snipers),
+            text(""),
+            renderCategorySection("ПУЛЕМЕТЫ", Color::Yellow, heavies),
+            text(""),
+            renderCategorySection("ХОЛОДНОЕ ОРУЖИЕ", Color::Gold1, melee),
+        }) | border | flex;
 
         skinsBody = hbox({
             leftCol,
@@ -192,13 +207,13 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
             nameTitle,
             text("  [ " + curRank.name + " ]") | bold | color(curRankCol),
             filler(),
-            text(" [ 🎨 КОЛЛЕКЦИЯ СКИНОВ В ИГРЕ ] ") | bold | color(Color::CyanLight) | border
+            text(" [ КОЛЛЕКЦИЯ СКИНОВ В ИГРЕ ] ") | bold | color(Color::CyanLight) | border
         }),
         separator(),
         hbox({
             renderProfileTabs(PlayerProfileTab::SKINS),
             filler(),
-            text(" ✨ Особых скинов: " + std::to_string(customCount) + " из " + std::to_string(std::max(19, totalWeapons)) + " ") | color(Color::YellowLight) | bold
+            text(" ★ Особых скинов: " + std::to_string(customCount) + " из " + std::to_string(std::min(19, std::max(19, totalWeapons))) + " ") | color(Color::YellowLight) | bold
         })
     });
 
@@ -211,8 +226,6 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     }) | border;
 
     return vbox({
-        filler(),
-        hbox({ filler(), contentBox | size(WIDTH, GREATER_THAN, 78) | size(WIDTH, LESS_THAN, 115), filler() }),
-        filler()
+        contentBox | size(WIDTH, GREATER_THAN, 80) | size(WIDTH, LESS_THAN, 110) | center
     });
 }

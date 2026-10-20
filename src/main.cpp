@@ -39,7 +39,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.8.0";
+const std::string CURRENT_VERSION = "v2.8.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -1801,6 +1801,13 @@ static const std::vector<DefaultWeaponMeta> DEFAULT_WEAPONS = {
     {"2f59173c-4bed-b6c3-2191-dea9b58be9c7", "Нож", "ХОЛОДНОЕ ОРУЖИЕ", 7, 19}
 };
 
+static bool isPlayableWeapon(const std::string& weaponUuid) {
+    for (const auto& dw : DEFAULT_WEAPONS) {
+        if (dw.uuid == weaponUuid) return true;
+    }
+    return false;
+}
+
 struct SkinMetadata {
     std::string skinUuid;
     std::string skinName;
@@ -1862,6 +1869,7 @@ static void parseWeaponsJson(const std::string& jsonStr) {
             std::string wName = getJsonKeyStr(w, {"displayName"});
             std::string wCat = getJsonKeyStr(w, {"category"});
             if (wUuid.empty()) continue;
+            if (!isPlayableWeapon(wUuid)) continue;
             
             std::string catClean = "ДРУГОЕ";
             if (wCat.find("Sidearm") != std::string::npos) catClean = "ПИСТОЛЕТЫ";
@@ -2062,6 +2070,7 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
 
                 if (jLoadout.contains("Items") && jLoadout["Items"].is_object()) {
                     for (const auto& [weaponId, itemObj] : jLoadout["Items"].items()) {
+                        if (!isPlayableWeapon(weaponId)) continue;
                         std::string skinId = "";
                         std::string chromaId = "";
                         if (itemObj.contains("Sockets") && itemObj["Sockets"].is_object()) {
@@ -2116,6 +2125,7 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
 
             for (const auto& gunObj : j["Guns"]) {
                 std::string weaponId = getJsonKeyStr(gunObj, {"ID", "id"});
+                if (!isPlayableWeapon(weaponId)) continue;
                 std::string skinId = getJsonKeyStr(gunObj, {"SkinID", "skinId"});
                 std::string chromaId = getJsonKeyStr(gunObj, {"ChromaID", "chromaId"});
                 WeaponSkinInfo wsi = resolveWeaponSkin(weaponId, skinId, chromaId);
@@ -2262,8 +2272,8 @@ int main() {
     if (console) {
         HMONITOR hMon = MonitorFromWindow(console, MONITOR_DEFAULTTONEAREST);
         MONITORINFO mi = { sizeof(mi) };
-        int targetW = 920;
-        int targetH = 580;
+        int targetW = 960;
+        int targetH = 640;
         int startX = 20;
         int startY = 20;
         if (GetMonitorInfoA(hMon, &mi)) {
