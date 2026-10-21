@@ -15,3 +15,8 @@ target_link_libraries(RolsTraker PRIVATE ftxui::screen ftxui::dom ftxui::compone
 if(WIN32)
     target_link_options(RolsTraker PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
+
+add_custom_command(TARGET RolsTraker POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:RolsTraker> "${CMAKE_CURRENT_SOURCE_DIR}/RolsTraker.exe"
+    COMMENT "Syncing RolsTraker.exe to project root"
+)
