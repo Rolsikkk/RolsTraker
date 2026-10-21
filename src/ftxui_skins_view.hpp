@@ -31,6 +31,35 @@ struct PlayerWeaponLoadout {
     bool loading = false;
 };
 
+inline bool isKuronamiName(const std::string& skinName, const std::string& fullName) {
+    std::string sLower = skinName;
+    for (auto& c : sLower) c = tolower(c);
+    std::string fLower = fullName;
+    for (auto& c : fLower) c = tolower(c);
+    return (sLower.find("kuronami") != std::string::npos ||
+            fLower.find("kuronami") != std::string::npos ||
+            skinName.find("Куронами") != std::string::npos ||
+            skinName.find("куронами") != std::string::npos ||
+            fullName.find("Куронами") != std::string::npos ||
+            fullName.find("куронами") != std::string::npos);
+}
+
+inline bool checkKuronamiWeapon(const std::string& wName, const std::string& skinName, const std::string& fullName, std::string& outWeapon) {
+    if (!isKuronamiName(skinName, fullName)) return false;
+    std::string wLower = wName;
+    for (auto& c : wLower) c = tolower(c);
+    if (wLower.find("vandal") != std::string::npos || wName.find("Вандал") != std::string::npos) {
+        outWeapon = "Вандал";
+        return true;
+    }
+    if (wLower.find("phantom") != std::string::npos || wName.find("Фантом") != std::string::npos) {
+        outWeapon = "Фантом";
+        return true;
+    }
+    outWeapon = wName;
+    return true;
+}
+
 extern std::map<std::string, PlayerWeaponLoadout> g_playerLoadouts;
 extern std::mutex g_loadoutsMutex;
 extern ftxui::Box g_tabSkinsBox;
@@ -95,9 +124,17 @@ inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Col
             dispSkin = utf8_substr(dispSkin, 30) + "..";
         }
 
-        Element starIcon = w.isCustom ? (text("★ ") | color(Color::Gold1) | bold) : (text("· ") | color(Color::GrayDark));
+        bool isKuro = isKuronamiName(w.skinName, w.fullName);
+        if (isKuro) {
+            skinColor = Color::CyanLight;
+        }
+
+        Element starIcon = isKuro
+            ? (text("🌊 ") | color(Color::CyanLight) | bold)
+            : (w.isCustom ? (text("★ ") | color(Color::Gold1) | bold) : (text("· ") | color(Color::GrayDark)));
         Element skinText = text(dispSkin) | color(skinColor);
-        if (w.isCustom) skinText = skinText | bold;
+        if (w.isCustom || isKuro) skinText = skinText | bold;
+        if (isKuro) skinText = skinText | bgcolor(Color::RGB(15, 45, 65));
 
         Element row = hbox({
             text(" " + w.weaponName) | color(nameColor) | bold | size(WIDTH, EQUAL, 10),
@@ -214,6 +251,9 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
         hbox({
             renderProfileTabs(PlayerProfileTab::SKINS),
             filler(),
+            g_selectedPlayerInfo.hasKuronami
+                ? (hbox({ text(" [ 🌊 КУРОНАМИ: " + (g_selectedPlayerInfo.kuronamiWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.kuronamiWeapon) + " ] ") | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 65)), text(" ") }))
+                : text(""),
             (loadout.loaded && customCount <= 2)
                 ? (hbox({ text(" [ ⚡ ВНИМАНИЕ: БУСТЕР (" + std::to_string(customCount) + " ск.) ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(70, 15, 15)), text(" ") }))
                 : text(""),

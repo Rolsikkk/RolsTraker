@@ -41,7 +41,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "shell32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.9.1";
+const std::string CURRENT_VERSION = "v2.9.2";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -608,6 +608,10 @@ struct PlayerInfo {
     int detectedSharedMatches = 0;
     std::string detectedPartyLabel = "";
     std::string detectedPartyPartners = "";
+
+    // Kuronami Skin Detection
+    bool hasKuronami = false;
+    std::string kuronamiWeapon = "";
 };
 
 // Global view state
@@ -2793,12 +2797,21 @@ int main() {
                             const auto& pl = g_playerLoadouts[g_selectedPuuid];
                             if (pl.loaded) {
                                 int cCount = 0;
+                                bool kFound = false;
+                                std::string kWeapon = "";
                                 for (const auto& [wId, w] : pl.weapons) {
                                     if (w.isCustom) cCount++;
+                                    std::string outW;
+                                    if (checkKuronamiWeapon(w.weaponName, w.skinName, w.fullName, outW)) {
+                                        kFound = true;
+                                        kWeapon = outW;
+                                    }
                                 }
                                 g_selectedPlayerInfo.skinsLoaded = true;
                                 g_selectedPlayerInfo.customSkinCount = cCount;
                                 g_selectedPlayerInfo.isBooster = (cCount <= 2);
+                                g_selectedPlayerInfo.hasKuronami = kFound;
+                                g_selectedPlayerInfo.kuronamiWeapon = kWeapon;
                             }
                         }
                     }
@@ -2856,12 +2869,21 @@ int main() {
                             const auto& pl = g_playerLoadouts[p.puuid];
                             if (pl.loaded) {
                                 int cCount = 0;
+                                bool kFound = false;
+                                std::string kWeapon = "";
                                 for (const auto& [wId, w] : pl.weapons) {
                                     if (w.isCustom) cCount++;
+                                    std::string outW;
+                                    if (checkKuronamiWeapon(w.weaponName, w.skinName, w.fullName, outW)) {
+                                        kFound = true;
+                                        kWeapon = outW;
+                                    }
                                 }
                                 p.skinsLoaded = true;
                                 p.customSkinCount = cCount;
                                 p.isBooster = (cCount <= 2);
+                                p.hasKuronami = kFound;
+                                p.kuronamiWeapon = kWeapon;
                             }
                         }
                     }

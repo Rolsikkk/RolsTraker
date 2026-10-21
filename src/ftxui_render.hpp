@@ -232,6 +232,8 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
             std::string statusStr = !p.connectionStatus.empty() ? p.connectionStatus : "[AFK]";
             nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
             nameParts.push_back(ftxui::text(statusStr) | ftxui::bold | ftxui::inverted | ftxui::color(ftxui::Color::Red));
+        } else if (p.hasKuronami) {
+            nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::bgcolor(ftxui::Color::RGB(15, 45, 65)));
         } else {
             if (p.isMuted) {
                 nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::color(ftxui::Color::GrayDark));
@@ -241,6 +243,12 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
         }
         if (p.isMuted) {
             nameParts.push_back(ftxui::text("[MUTE] ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
+        }
+
+        // Kuronami badge
+        if (p.hasKuronami) {
+            std::string kW = p.kuronamiWeapon.empty() ? "" : " " + p.kuronamiWeapon;
+            nameParts.push_back(ftxui::text(" [КУРОНАМИ" + kW + " 🌊]") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 30, 45)));
         }
 
         // Smurf & Booster detection

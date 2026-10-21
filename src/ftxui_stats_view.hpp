@@ -135,6 +135,12 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         headerItems.push_back(text(pText) | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 60)) | center);
     }
 
+    if (g_selectedPlayerInfo.hasKuronami) {
+        std::string kW = g_selectedPlayerInfo.kuronamiWeapon.empty() ? "ВАНДАЛ / ФАНТОМ" : g_selectedPlayerInfo.kuronamiWeapon;
+        std::string kText = " [ 🌊 ЭКИПИРОВАН СКИН КУРОНАМИ: " + kW + " ] ";
+        headerItems.push_back(text(kText) | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 65)) | center);
+    }
+
     headerItems.push_back(separator());
     headerItems.push_back(hbox({
         renderProfileTabs(PlayerProfileTab::STATS),
