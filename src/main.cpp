@@ -24,6 +24,7 @@
 #include <nlohmann/json.hpp>
 #include <tlhelp32.h>
 #include <filesystem>
+#include <shellapi.h>
 
 // FTXUI Headers
 #include <ftxui/dom/elements.hpp>
@@ -37,9 +38,10 @@ using json = nlohmann::json;
 
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "shell32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.9.0";
+const std::string CURRENT_VERSION = "v2.9.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -617,6 +619,7 @@ PlayerInfo g_selectedPlayerInfo;
 std::map<std::string, ftxui::Box> g_playerBoxes;
 ftxui::Box g_myStatsBox;
 ftxui::Box g_backButtonBox;
+ftxui::Box g_openTrackerBox;
 ftxui::Box g_pickAgentBtnBox;
 ftxui::Box g_agentPickerBackBox;
 std::map<std::string, ftxui::Box> g_agentBoxes;
@@ -1766,6 +1769,29 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
             }
         }
     }
+}
+
+void openTrackerInBrowser(std::string gName, std::string tLine) {
+    if (gName.empty() && !g_selectedPuuid.empty()) {
+        std::lock_guard<std::mutex> lk(g_mutex);
+        if (g_nameCache.count(g_selectedPuuid)) {
+            gName = g_nameCache[g_selectedPuuid].first;
+            if (tLine.empty()) tLine = g_nameCache[g_selectedPuuid].second;
+        }
+    }
+    if (gName.empty()) return;
+    size_t hashPos = gName.find('#');
+    if (hashPos != std::string::npos) {
+        if (tLine.empty()) tLine = gName.substr(hashPos + 1);
+        gName = gName.substr(0, hashPos);
+    }
+    if (!tLine.empty() && tLine[0] == '#') {
+        tLine = tLine.substr(1);
+    }
+    std::string url = "https://tracker.gg/valorant/profile/riot/" + urlEncode(gName) + "%23" + urlEncode(tLine) + "/overview";
+    std::thread([url]() {
+        ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    }).detach();
 }
 
 #include "discord_rpc.hpp"
@@ -2952,6 +2978,10 @@ int main() {
                 g_playerProfileTab = PlayerProfileTab::STATS;
                 return true;
             }
+            if (event == ftxui::Event::Character('o') || event == ftxui::Event::Character('O') || event == ftxui::Event::Character(L'щ') || event == ftxui::Event::Character(L'Щ')) {
+                openTrackerInBrowser(g_selectedPlayerInfo.gameName, g_selectedPlayerInfo.tagLine);
+                return true;
+            }
         }
 
         if (event == ftxui::Event::Escape) {
@@ -3161,6 +3191,12 @@ int main() {
                     g_activeButton = "tab_stats";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();
                     g_playerProfileTab = PlayerProfileTab::STATS;
+                    return true;
+                }
+                if (g_openTrackerBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "open_tracker";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    openTrackerInBrowser(g_selectedPlayerInfo.gameName, g_selectedPlayerInfo.tagLine);
                     return true;
                 }
                 if (g_backButtonBox.Contain(event.mouse().x, event.mouse().y)) {

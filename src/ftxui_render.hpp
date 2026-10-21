@@ -38,6 +38,8 @@ extern bool g_mousePressed;
 extern std::string g_activeButton;
 extern std::chrono::steady_clock::time_point g_lastButtonClickTime;
 extern ftxui::Box g_backButtonBox;
+extern ftxui::Box g_openTrackerBox;
+void openTrackerInBrowser(std::string gName, std::string tLine);
 extern ftxui::Box g_pickAgentBtnBox;
 extern ftxui::Box g_agentPickerBackBox;
 extern std::map<std::string, ftxui::Box> g_agentBoxes;
