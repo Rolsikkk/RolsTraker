@@ -80,10 +80,10 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
     };
 
     std::vector<RoleGroup> groups = {
-        {"💥 ДУЭЛЯНТЫ", Color::RedLight, {}},
-        {"🛡️ ИНИЦИАТОРЫ", Color::YellowLight, {}},
-        {"💨 СПЕЦИАЛИСТЫ", Color::MagentaLight, {}},
-        {"🔒 СТРАЖИ", Color::CyanLight, {}}
+        {"ДУЭЛЯНТЫ", Color::RedLight, {}},
+        {"ИНИЦИАТОРЫ", Color::YellowLight, {}},
+        {"СПЕЦИАЛИСТЫ", Color::MagentaLight, {}},
+        {"СТРАЖИ", Color::CyanLight, {}}
     };
 
     const auto& allAgents = getStaticAgentList();
@@ -117,7 +117,7 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
                 );
             } else if (!isOwned && ownedAgents.size() > 5) {
                 items.push_back(
-                    text(" " + ag.name + " 🔒 ") 
+                    text(" " + ag.name + " (Закрыт) ") 
                     | color(Color::RGB(120, 120, 120)) 
                     | center 
                     | border
@@ -140,8 +140,8 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
     Element statusElement = text("");
     if (!g_pickStatusMsg.empty()) {
         Color sColor = Color::YellowLight;
-        if (g_pickStatusMsg.find("✅") != std::string::npos) sColor = Color::GreenLight;
-        else if (g_pickStatusMsg.find("❌") != std::string::npos) sColor = Color::RedLight;
+        if (g_pickStatusMsg.find("[OK]") != std::string::npos || g_pickStatusMsg.find("УСПЕШНО") != std::string::npos) sColor = Color::GreenLight;
+        else if (g_pickStatusMsg.find("[ОШИБКА]") != std::string::npos || g_pickStatusMsg.find("ERROR") != std::string::npos) sColor = Color::RedLight;
 
         statusElement = hbox({
             text("  " + g_pickStatusMsg + "  ") | bold | color(sColor) | border
@@ -155,9 +155,9 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
     auto modal = vbox({
         // Top Banner
         hbox({
-            text(" ⚡ ВЫБОР АГЕНТА (АВТО-ПИК) ") | bold | color(Color::YellowLight),
+            text(" ВЫБОР АГЕНТА (АВТО-ПИК) ") | bold | color(Color::YellowLight),
             filler(),
-            text(" 🗺️ КАРТА: ") | bold | color(Color::Black) | bgcolor(Color::Yellow),
+            text(" КАРТА: ") | bold | color(Color::Black) | bgcolor(Color::Yellow),
             text(" " + currentMapName + " ") | bold | color(Color::White) | bgcolor(Color::RGB(50, 50, 75)),
         }),
         separator(),

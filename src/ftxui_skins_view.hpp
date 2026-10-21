@@ -225,11 +225,9 @@ inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Col
             skinColor = Color::RedLight;
         }
 
-        Element starIcon = isKuro
-            ? (text("🌊 ") | color(Color::CyanLight) | bold)
-            : (isNoct ? (text("🗡️ ") | color(Color::MagentaLight) | bold)
-                      : (isPrim ? (text("🔥 ") | color(Color::RedLight) | bold)
-                                : (w.isCustom ? (text("★ ") | color(Color::Gold1) | bold) : (text("· ") | color(Color::GrayDark)))));
+        Element starIcon = (w.isCustom || isKuro || isNoct || isPrim)
+            ? (text("* ") | color(skinColor) | bold)
+            : (text(". ") | color(Color::GrayDark));
         Element skinText = text(dispSkin) | color(skinColor);
         if (w.isCustom || isKuro || isNoct || isPrim) skinText = skinText | bold;
         if (isKuro) skinText = skinText | bgcolor(Color::RGB(15, 45, 65));
@@ -251,7 +249,7 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     using namespace ftxui;
 
     auto backBtn = renderButton("ESC - Назад", g_backButtonBox, Color::CyanLight, "back", g_mousePressed) | reflect(g_backButtonBox);
-    auto trackerBtn = renderButton("🌐 Открыть Tracker.gg (O)", g_openTrackerBox, Color::GreenLight, "open_tracker", g_mousePressed) | reflect(g_openTrackerBox);
+    auto trackerBtn = renderButton("Открыть Tracker.gg (O)", g_openTrackerBox, Color::GreenLight, "open_tracker", g_mousePressed) | reflect(g_openTrackerBox);
 
     std::string fullName = g_selectedPlayerInfo.gameName + (g_selectedPlayerInfo.tagLine.empty() ? "" : "#" + g_selectedPlayerInfo.tagLine);
     ftxui::Element nameTitle = text(fullName) | bold | color(Color::White);
@@ -352,18 +350,18 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
             renderProfileTabs(PlayerProfileTab::SKINS),
             filler(),
             g_selectedPlayerInfo.hasKuronami
-                ? (hbox({ text(" [ 🌊 КУРОНАМИ: " + (g_selectedPlayerInfo.kuronamiWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.kuronamiWeapon) + " ] ") | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 65)), text(" ") }))
+                ? (hbox({ text(" [ КУРОНАМИ: " + (g_selectedPlayerInfo.kuronamiWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.kuronamiWeapon) + " ] ") | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 65)), text(" ") }))
                 : text(""),
             g_selectedPlayerInfo.hasNocturnum
-                ? (hbox({ text(" [ 🗡️ ОСТРИЁ ТЬМЫ: " + (g_selectedPlayerInfo.nocturnumWeapon.empty() ? "ФАНТОМ" : g_selectedPlayerInfo.nocturnumWeapon) + " ] ") | bold | color(Color::MagentaLight) | bgcolor(Color::RGB(55, 10, 45)), text(" ") }))
+                ? (hbox({ text(" [ ОСТРИЁ ТЬМЫ: " + (g_selectedPlayerInfo.nocturnumWeapon.empty() ? "ФАНТОМ" : g_selectedPlayerInfo.nocturnumWeapon) + " ] ") | bold | color(Color::MagentaLight) | bgcolor(Color::RGB(55, 10, 45)), text(" ") }))
                 : text(""),
             g_selectedPlayerInfo.hasPrimordium
-                ? (hbox({ text(" [ 🔥 ПЕРВОНАЧАЛО: " + (g_selectedPlayerInfo.primordiumWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.primordiumWeapon) + " ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(65, 20, 10)), text(" ") }))
+                ? (hbox({ text(" [ ПЕРВОНАЧАЛО: " + (g_selectedPlayerInfo.primordiumWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.primordiumWeapon) + " ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(65, 20, 10)), text(" ") }))
                 : text(""),
             (loadout.loaded && customCount <= 2)
-                ? (hbox({ text(" [ ⚡ ВНИМАНИЕ: БУСТЕР (" + std::to_string(customCount) + " ск.) ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(70, 15, 15)), text(" ") }))
+                ? (hbox({ text(" [ ВНИМАНИЕ: БУСТЕР (" + std::to_string(customCount) + " ск.) ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(70, 15, 15)), text(" ") }))
                 : text(""),
-            text(" ★ Особых скинов: " + std::to_string(customCount) + " из " + std::to_string(std::min(19, std::max(19, totalWeapons))) + " ") | color((loadout.loaded && customCount <= 2) ? Color::RedLight : Color::YellowLight) | bold
+            text(" Особых скинов: " + std::to_string(customCount) + " из " + std::to_string(std::min(19, std::max(19, totalWeapons))) + " ") | color((loadout.loaded && customCount <= 2) ? Color::RedLight : Color::YellowLight) | bold
         })
     });
 

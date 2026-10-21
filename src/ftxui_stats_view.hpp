@@ -15,7 +15,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     using namespace ftxui;
 
     auto backBtn = renderButton("ESC - Назад", g_backButtonBox, Color::CyanLight, "back", g_mousePressed) | reflect(g_backButtonBox);
-    auto trackerBtn = renderButton("🌐 Открыть Tracker.gg (O)", g_openTrackerBox, Color::GreenLight, "open_tracker", g_mousePressed) | reflect(g_openTrackerBox);
+    auto trackerBtn = renderButton("Открыть Tracker.gg (O)", g_openTrackerBox, Color::GreenLight, "open_tracker", g_mousePressed) | reflect(g_openTrackerBox);
     
     std::string fullName = g_selectedPlayerInfo.gameName + (g_selectedPlayerInfo.tagLine.empty() ? "" : "#" + g_selectedPlayerInfo.tagLine);
     ftxui::Element nameTitle = text(fullName) | bold | color(Color::White);
@@ -113,7 +113,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     };
 
     if (g_selectedPlayerInfo.isBooster) {
-        std::string bText = " [ ⚡ ВНИМАНИЕ: ВОЗМОЖНЫЙ БУСТЕР — ";
+        std::string bText = " [ ВНИМАНИЕ: ВОЗМОЖНЫЙ БУСТЕР — ";
         if (g_selectedPlayerInfo.customSkinCount >= 0) {
             bText += "ВСЕГО " + std::to_string(g_selectedPlayerInfo.customSkinCount) + " ИЗ 19 СКИНОВ В ИНВЕНТАРЕ";
         } else {
@@ -124,7 +124,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     }
 
     if (g_selectedPlayerInfo.detectedPartySize >= 2) {
-        std::string pText = " [ 👥 В ПАЧКЕ: " + g_selectedPlayerInfo.detectedPartyLabel;
+        std::string pText = " [ В ПАЧКЕ: " + g_selectedPlayerInfo.detectedPartyLabel;
         if (!g_selectedPlayerInfo.detectedPartyPartners.empty()) {
             pText += " с " + g_selectedPlayerInfo.detectedPartyPartners;
         }
@@ -137,19 +137,19 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
 
     if (g_selectedPlayerInfo.hasKuronami) {
         std::string kW = g_selectedPlayerInfo.kuronamiWeapon.empty() ? "ВАНДАЛ / ФАНТОМ" : g_selectedPlayerInfo.kuronamiWeapon;
-        std::string kText = " [ 🌊 ЭКИПИРОВАН СКИН КУРОНАМИ: " + kW + " ] ";
+        std::string kText = " [ ЭКИПИРОВАН СКИН КУРОНАМИ: " + kW + " ] ";
         headerItems.push_back(text(kText) | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 65)) | center);
     }
 
     if (g_selectedPlayerInfo.hasNocturnum) {
         std::string nW = g_selectedPlayerInfo.nocturnumWeapon.empty() ? "ФАНТОМ" : g_selectedPlayerInfo.nocturnumWeapon;
-        std::string nText = " [ 🗡️ ЭКИПИРОВАН СКИН ОСТРИЁ ТЬМЫ: " + nW + " ] ";
+        std::string nText = " [ ЭКИПИРОВАН СКИН ОСТРИЁ ТЬМЫ: " + nW + " ] ";
         headerItems.push_back(text(nText) | bold | color(Color::MagentaLight) | bgcolor(Color::RGB(55, 10, 45)) | center);
     }
 
     if (g_selectedPlayerInfo.hasPrimordium) {
         std::string prW = g_selectedPlayerInfo.primordiumWeapon.empty() ? "ВАНДАЛ / ФАНТОМ" : g_selectedPlayerInfo.primordiumWeapon;
-        std::string prText = " [ 🔥 ЭКИПИРОВАН СКИН ПЕРВОНАЧАЛО: " + prW + " ] ";
+        std::string prText = " [ ЭКИПИРОВАН СКИН ПЕРВОНАЧАЛО: " + prW + " ] ";
         headerItems.push_back(text(prText) | bold | color(Color::RedLight) | bgcolor(Color::RGB(65, 20, 10)) | center);
     }
 
@@ -157,7 +157,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     headerItems.push_back(hbox({
         renderProfileTabs(PlayerProfileTab::STATS),
         filler(),
-        text(" [ 📊 БОЕВАЯ СТАТИСТИКА ] ") | bold | color(Color::GreenLight)
+        text(" [ БОЕВАЯ СТАТИСТИКА ] ") | bold | color(Color::GreenLight)
     }));
     headerItems.push_back(separator());
 

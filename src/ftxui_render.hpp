@@ -254,30 +254,30 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
         // Kuronami badge
         if (p.hasKuronami) {
             std::string kW = p.kuronamiWeapon.empty() ? "" : " " + p.kuronamiWeapon;
-            nameParts.push_back(ftxui::text(" [КУРОНАМИ" + kW + " 🌊]") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 30, 45)));
+            nameParts.push_back(ftxui::text(" [КУРОНАМИ" + kW + "]") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 30, 45)));
         }
 
         // Nocturnum / Остриё тьмы badge
         if (p.hasNocturnum) {
             std::string nW = p.nocturnumWeapon.empty() ? "" : " " + p.nocturnumWeapon;
-            nameParts.push_back(ftxui::text(" [ОСТРИЁ ТЬМЫ" + nW + " 🗡️]") | ftxui::bold | ftxui::color(ftxui::Color::MagentaLight) | ftxui::bgcolor(ftxui::Color::RGB(45, 10, 35)));
+            nameParts.push_back(ftxui::text(" [ОСТРИЁ ТЬМЫ" + nW + "]") | ftxui::bold | ftxui::color(ftxui::Color::MagentaLight) | ftxui::bgcolor(ftxui::Color::RGB(45, 10, 35)));
         }
 
         // Primordium / Первоначало badge
         if (p.hasPrimordium) {
             std::string prW = p.primordiumWeapon.empty() ? "" : " " + p.primordiumWeapon;
-            nameParts.push_back(ftxui::text(" [ПЕРВОНАЧАЛО" + prW + " 🔥]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::bgcolor(ftxui::Color::RGB(55, 15, 10)));
+            nameParts.push_back(ftxui::text(" [ПЕРВОНАЧАЛО" + prW + "]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::bgcolor(ftxui::Color::RGB(55, 15, 10)));
         }
 
         // Smurf & Booster detection
         bool isSmurfKd = (p.kdRatio >= 1.4f && p.matchesPlayed >= 5 && !p.isPrivate && ((float)p.matchesWon / p.matchesPlayed >= 0.55f));
         if (isSmurfKd) {
-            nameParts.push_back(ftxui::text(" [SMURF ⚠️]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
+            nameParts.push_back(ftxui::text(" [SMURF]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
         }
         if (p.isBooster) {
-            std::string bStr = " [БУСТЕР ⚡]";
+            std::string bStr = " [БУСТЕР]";
             if (p.customSkinCount >= 0) {
-                bStr = " [БУСТЕР (" + std::to_string(p.customSkinCount) + " ск.) ⚡]";
+                bStr = " [БУСТЕР (" + std::to_string(p.customSkinCount) + " ск.)]";
             }
             nameParts.push_back(ftxui::text(bStr) | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
         }
@@ -500,7 +500,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     if (state.phase == "pregame" && !displayMapName.empty()) {
         uiElements.push_back(ftxui::hbox({
             ftxui::filler() | ftxui::flex,
-            ftxui::text(" 🗺️ ВЫБРАНА КАРТА: ") | ftxui::bold | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Yellow),
+            ftxui::text(" ВЫБРАНА КАРТА: ") | ftxui::bold | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Yellow),
             ftxui::text(" " + displayMapName + " ") | ftxui::bold | ftxui::color(ftxui::Color::White) | ftxui::bgcolor(ftxui::Color::RGB(50, 50, 75)),
             ftxui::text(" [ВЫБОР АГЕНТОВ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight),
             ftxui::filler() | ftxui::flex
@@ -522,7 +522,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ? ftxui::hbox({
                 renderButton("УКЛОНИТЬСЯ (DODGE)", g_dodgeButtonBox, ftxui::Color::RedLight, "dodge", g_mousePressed) | ftxui::reflect(g_dodgeButtonBox),
                 ftxui::text(" "),
-                renderButton("⚡ ВЫБРАТЬ АГЕНТА (P)", g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox)
+                renderButton("ВЫБРАТЬ АГЕНТА (P)", g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox)
             })
             : ftxui::hbox({
                 ftxui::text(" Выйти? ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
@@ -532,11 +532,11 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             })
         ) : ftxui::text("")),
         ftxui::filler() | ftxui::flex,
-        renderButton("🎨 Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
+        renderButton("Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
         ftxui::filler() | ftxui::flex,
         (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) : ftxui::text(""))
     }));
-    uiElements.push_back(ftxui::text(" 💡 Нажмите на имя любого игрока, чтобы увидеть все его скины оружия ") | ftxui::color(ftxui::Color::Cyan) | ftxui::center);
+    uiElements.push_back(ftxui::text(" Нажмите на имя любого игрока, чтобы увидеть все его скины оружия ") | ftxui::color(ftxui::Color::Cyan) | ftxui::center);
 
     return ftxui::vbox(std::move(uiElements)) | ftxui::border;
 }

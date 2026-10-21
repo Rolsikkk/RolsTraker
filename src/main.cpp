@@ -41,7 +41,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "shell32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.9.4";
+const std::string CURRENT_VERSION = "v2.9.5";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -3297,9 +3297,9 @@ int main() {
                                 std::lock_guard<std::mutex> lk(g_mutex);
                                 g_isLockingAgent = false;
                                 if (ok) {
-                                    g_pickStatusMsg = "✅ УСПЕШНО ЗАБЛОКИРОВАН: " + curAgentName + "!";
+                                    g_pickStatusMsg = "[OK] УСПЕШНО ЗАБЛОКИРОВАН: " + curAgentName + "!";
                                 } else {
-                                    g_pickStatusMsg = "❌ " + err;
+                                    g_pickStatusMsg = "[ОШИБКА] " + err;
                                 }
                             }
                             screen.PostEvent(ftxui::Event::Custom);
