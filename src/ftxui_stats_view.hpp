@@ -147,6 +147,12 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         headerItems.push_back(text(nText) | bold | color(Color::MagentaLight) | bgcolor(Color::RGB(55, 10, 45)) | center);
     }
 
+    if (g_selectedPlayerInfo.hasPrimordium) {
+        std::string prW = g_selectedPlayerInfo.primordiumWeapon.empty() ? "ВАНДАЛ / ФАНТОМ" : g_selectedPlayerInfo.primordiumWeapon;
+        std::string prText = " [ 🔥 ЭКИПИРОВАН СКИН ПЕРВОНАЧАЛО: " + prW + " ] ";
+        headerItems.push_back(text(prText) | bold | color(Color::RedLight) | bgcolor(Color::RGB(65, 20, 10)) | center);
+    }
+
     headerItems.push_back(separator());
     headerItems.push_back(hbox({
         renderProfileTabs(PlayerProfileTab::STATS),

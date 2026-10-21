@@ -232,12 +232,14 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
             std::string statusStr = !p.connectionStatus.empty() ? p.connectionStatus : "[AFK]";
             nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
             nameParts.push_back(ftxui::text(statusStr) | ftxui::bold | ftxui::inverted | ftxui::color(ftxui::Color::Red));
-        } else if (p.hasKuronami && p.hasNocturnum) {
+        } else if ((p.hasKuronami ? 1 : 0) + (p.hasNocturnum ? 1 : 0) + (p.hasPrimordium ? 1 : 0) >= 2) {
             nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::bgcolor(ftxui::Color::RGB(40, 20, 50)));
         } else if (p.hasKuronami) {
             nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::bgcolor(ftxui::Color::RGB(15, 45, 65)));
         } else if (p.hasNocturnum) {
             nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::MagentaLight) | ftxui::bgcolor(ftxui::Color::RGB(55, 10, 45)));
+        } else if (p.hasPrimordium) {
+            nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::bgcolor(ftxui::Color::RGB(65, 20, 10)));
         } else {
             if (p.isMuted) {
                 nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::color(ftxui::Color::GrayDark));
@@ -259,6 +261,12 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
         if (p.hasNocturnum) {
             std::string nW = p.nocturnumWeapon.empty() ? "" : " " + p.nocturnumWeapon;
             nameParts.push_back(ftxui::text(" [ОСТРИЁ ТЬМЫ" + nW + " 🗡️]") | ftxui::bold | ftxui::color(ftxui::Color::MagentaLight) | ftxui::bgcolor(ftxui::Color::RGB(45, 10, 35)));
+        }
+
+        // Primordium / Первоначало badge
+        if (p.hasPrimordium) {
+            std::string prW = p.primordiumWeapon.empty() ? "" : " " + p.primordiumWeapon;
+            nameParts.push_back(ftxui::text(" [ПЕРВОНАЧАЛО" + prW + " 🔥]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::bgcolor(ftxui::Color::RGB(55, 15, 10)));
         }
 
         // Smurf & Booster detection

@@ -106,6 +106,50 @@ inline bool checkNocturnumWeapon(const std::string& wName, const std::string& sk
     return true;
 }
 
+inline bool isPrimordiumName(const std::string& skinName, const std::string& fullName) {
+    std::string sLower = skinName;
+    for (auto& c : sLower) c = tolower(c);
+    std::string fLower = fullName;
+    for (auto& c : fLower) c = tolower(c);
+    if (sLower.find("primord") != std::string::npos || fLower.find("primord") != std::string::npos) {
+        return true;
+    }
+    if (sLower.find("первоначал") != std::string::npos || fLower.find("первоначал") != std::string::npos ||
+        skinName.find("Первоначал") != std::string::npos || fullName.find("Первоначал") != std::string::npos) {
+        return true;
+    }
+    return false;
+}
+
+inline bool checkPrimordiumWeapon(const std::string& wName, const std::string& skinName, const std::string& fullName, std::string& outWeapon) {
+    if (!isPrimordiumName(skinName, fullName)) return false;
+    std::string wLower = wName;
+    for (auto& c : wLower) c = tolower(c);
+    if (wLower.find("vandal") != std::string::npos || wName.find("Вандал") != std::string::npos) {
+        outWeapon = "Вандал";
+        return true;
+    }
+    if (wLower.find("phantom") != std::string::npos || wName.find("Фантом") != std::string::npos) {
+        outWeapon = "Фантом";
+        return true;
+    }
+    if (wLower.find("spectre") != std::string::npos || wName.find("Спектр") != std::string::npos) {
+        outWeapon = "Spectre";
+        return true;
+    }
+    if (wLower.find("shorty") != std::string::npos || wName.find("Шорти") != std::string::npos) {
+        outWeapon = "Shorty";
+        return true;
+    }
+    if (wLower.find("melee") != std::string::npos || wName.find("Нож") != std::string::npos || wName.find("Клинк") != std::string::npos ||
+        skinName.find("Клинки") != std::string::npos || fullName.find("Blades") != std::string::npos) {
+        outWeapon = "Клинки";
+        return true;
+    }
+    outWeapon = wName;
+    return true;
+}
+
 extern std::map<std::string, PlayerWeaponLoadout> g_playerLoadouts;
 extern std::mutex g_loadoutsMutex;
 extern ftxui::Box g_tabSkinsBox;
@@ -172,20 +216,25 @@ inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Col
 
         bool isKuro = isKuronamiName(w.skinName, w.fullName);
         bool isNoct = isNocturnumName(w.skinName, w.fullName);
+        bool isPrim = isPrimordiumName(w.skinName, w.fullName);
         if (isKuro) {
             skinColor = Color::CyanLight;
         } else if (isNoct) {
             skinColor = Color::MagentaLight;
+        } else if (isPrim) {
+            skinColor = Color::RedLight;
         }
 
         Element starIcon = isKuro
             ? (text("🌊 ") | color(Color::CyanLight) | bold)
             : (isNoct ? (text("🗡️ ") | color(Color::MagentaLight) | bold)
-                      : (w.isCustom ? (text("★ ") | color(Color::Gold1) | bold) : (text("· ") | color(Color::GrayDark))));
+                      : (isPrim ? (text("🔥 ") | color(Color::RedLight) | bold)
+                                : (w.isCustom ? (text("★ ") | color(Color::Gold1) | bold) : (text("· ") | color(Color::GrayDark)))));
         Element skinText = text(dispSkin) | color(skinColor);
-        if (w.isCustom || isKuro || isNoct) skinText = skinText | bold;
+        if (w.isCustom || isKuro || isNoct || isPrim) skinText = skinText | bold;
         if (isKuro) skinText = skinText | bgcolor(Color::RGB(15, 45, 65));
         else if (isNoct) skinText = skinText | bgcolor(Color::RGB(55, 10, 45));
+        else if (isPrim) skinText = skinText | bgcolor(Color::RGB(65, 20, 10));
 
         Element row = hbox({
             text(" " + w.weaponName) | color(nameColor) | bold | size(WIDTH, EQUAL, 10),
@@ -307,6 +356,9 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
                 : text(""),
             g_selectedPlayerInfo.hasNocturnum
                 ? (hbox({ text(" [ 🗡️ ОСТРИЁ ТЬМЫ: " + (g_selectedPlayerInfo.nocturnumWeapon.empty() ? "ФАНТОМ" : g_selectedPlayerInfo.nocturnumWeapon) + " ] ") | bold | color(Color::MagentaLight) | bgcolor(Color::RGB(55, 10, 45)), text(" ") }))
+                : text(""),
+            g_selectedPlayerInfo.hasPrimordium
+                ? (hbox({ text(" [ 🔥 ПЕРВОНАЧАЛО: " + (g_selectedPlayerInfo.primordiumWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.primordiumWeapon) + " ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(65, 20, 10)), text(" ") }))
                 : text(""),
             (loadout.loaded && customCount <= 2)
                 ? (hbox({ text(" [ ⚡ ВНИМАНИЕ: БУСТЕР (" + std::to_string(customCount) + " ск.) ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(70, 15, 15)), text(" ") }))
