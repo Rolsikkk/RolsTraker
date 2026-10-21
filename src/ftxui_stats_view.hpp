@@ -141,6 +141,12 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         headerItems.push_back(text(kText) | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 65)) | center);
     }
 
+    if (g_selectedPlayerInfo.hasNocturnum) {
+        std::string nW = g_selectedPlayerInfo.nocturnumWeapon.empty() ? "ФАНТОМ" : g_selectedPlayerInfo.nocturnumWeapon;
+        std::string nText = " [ 🗡️ ЭКИПИРОВАН СКИН ОСТРИЁ ТЬМЫ: " + nW + " ] ";
+        headerItems.push_back(text(nText) | bold | color(Color::MagentaLight) | bgcolor(Color::RGB(55, 10, 45)) | center);
+    }
+
     headerItems.push_back(separator());
     headerItems.push_back(hbox({
         renderProfileTabs(PlayerProfileTab::STATS),

@@ -41,7 +41,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "shell32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.9.2";
+const std::string CURRENT_VERSION = "v2.9.3";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -612,6 +612,10 @@ struct PlayerInfo {
     // Kuronami Skin Detection
     bool hasKuronami = false;
     std::string kuronamiWeapon = "";
+
+    // Nocturnum Skin Detection
+    bool hasNocturnum = false;
+    std::string nocturnumWeapon = "";
 };
 
 // Global view state
@@ -2799,6 +2803,8 @@ int main() {
                                 int cCount = 0;
                                 bool kFound = false;
                                 std::string kWeapon = "";
+                                bool nFound = false;
+                                std::string nWeapon = "";
                                 for (const auto& [wId, w] : pl.weapons) {
                                     if (w.isCustom) cCount++;
                                     std::string outW;
@@ -2806,12 +2812,19 @@ int main() {
                                         kFound = true;
                                         kWeapon = outW;
                                     }
+                                    std::string outN;
+                                    if (checkNocturnumWeapon(w.weaponName, w.skinName, w.fullName, outN)) {
+                                        nFound = true;
+                                        nWeapon = outN;
+                                    }
                                 }
                                 g_selectedPlayerInfo.skinsLoaded = true;
                                 g_selectedPlayerInfo.customSkinCount = cCount;
                                 g_selectedPlayerInfo.isBooster = (cCount <= 2);
                                 g_selectedPlayerInfo.hasKuronami = kFound;
                                 g_selectedPlayerInfo.kuronamiWeapon = kWeapon;
+                                g_selectedPlayerInfo.hasNocturnum = nFound;
+                                g_selectedPlayerInfo.nocturnumWeapon = nWeapon;
                             }
                         }
                     }
@@ -2871,6 +2884,8 @@ int main() {
                                 int cCount = 0;
                                 bool kFound = false;
                                 std::string kWeapon = "";
+                                bool nFound = false;
+                                std::string nWeapon = "";
                                 for (const auto& [wId, w] : pl.weapons) {
                                     if (w.isCustom) cCount++;
                                     std::string outW;
@@ -2878,12 +2893,19 @@ int main() {
                                         kFound = true;
                                         kWeapon = outW;
                                     }
+                                    std::string outN;
+                                    if (checkNocturnumWeapon(w.weaponName, w.skinName, w.fullName, outN)) {
+                                        nFound = true;
+                                        nWeapon = outN;
+                                    }
                                 }
                                 p.skinsLoaded = true;
                                 p.customSkinCount = cCount;
                                 p.isBooster = (cCount <= 2);
                                 p.hasKuronami = kFound;
                                 p.kuronamiWeapon = kWeapon;
+                                p.hasNocturnum = nFound;
+                                p.nocturnumWeapon = nWeapon;
                             }
                         }
                     }

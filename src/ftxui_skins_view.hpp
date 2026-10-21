@@ -60,6 +60,52 @@ inline bool checkKuronamiWeapon(const std::string& wName, const std::string& ski
     return true;
 }
 
+inline bool isNocturnumName(const std::string& skinName, const std::string& fullName) {
+    std::string sLower = skinName;
+    for (auto& c : sLower) c = tolower(c);
+    std::string fLower = fullName;
+    for (auto& c : fLower) c = tolower(c);
+    if (sLower.find("nocturnum") != std::string::npos || fLower.find("nocturnum") != std::string::npos) {
+        return true;
+    }
+    if ((sLower.find("остри") != std::string::npos || fLower.find("остри") != std::string::npos ||
+         skinName.find("Остри") != std::string::npos || fullName.find("Остри") != std::string::npos) &&
+        (sLower.find("тьм") != std::string::npos || fLower.find("тьм") != std::string::npos ||
+         skinName.find("тьм") != std::string::npos || fullName.find("тьм") != std::string::npos ||
+         skinName.find("Тьм") != std::string::npos || fullName.find("Тьм") != std::string::npos)) {
+        return true;
+    }
+    return false;
+}
+
+inline bool checkNocturnumWeapon(const std::string& wName, const std::string& skinName, const std::string& fullName, std::string& outWeapon) {
+    if (!isNocturnumName(skinName, fullName)) return false;
+    std::string wLower = wName;
+    for (auto& c : wLower) c = tolower(c);
+    if (wLower.find("phantom") != std::string::npos || wName.find("Фантом") != std::string::npos) {
+        outWeapon = "Фантом";
+        return true;
+    }
+    if (wLower.find("vandal") != std::string::npos || wName.find("Вандал") != std::string::npos) {
+        outWeapon = "Вандал";
+        return true;
+    }
+    if (wLower.find("classic") != std::string::npos || wName.find("Классик") != std::string::npos) {
+        outWeapon = "Classic";
+        return true;
+    }
+    if (wLower.find("marshal") != std::string::npos || wName.find("Маршал") != std::string::npos) {
+        outWeapon = "Marshal";
+        return true;
+    }
+    if (wLower.find("bulldog") != std::string::npos || wName.find("Бульдог") != std::string::npos) {
+        outWeapon = "Bulldog";
+        return true;
+    }
+    outWeapon = wName;
+    return true;
+}
+
 extern std::map<std::string, PlayerWeaponLoadout> g_playerLoadouts;
 extern std::mutex g_loadoutsMutex;
 extern ftxui::Box g_tabSkinsBox;
@@ -125,16 +171,21 @@ inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Col
         }
 
         bool isKuro = isKuronamiName(w.skinName, w.fullName);
+        bool isNoct = isNocturnumName(w.skinName, w.fullName);
         if (isKuro) {
             skinColor = Color::CyanLight;
+        } else if (isNoct) {
+            skinColor = Color::MagentaLight;
         }
 
         Element starIcon = isKuro
             ? (text("🌊 ") | color(Color::CyanLight) | bold)
-            : (w.isCustom ? (text("★ ") | color(Color::Gold1) | bold) : (text("· ") | color(Color::GrayDark)));
+            : (isNoct ? (text("🗡️ ") | color(Color::MagentaLight) | bold)
+                      : (w.isCustom ? (text("★ ") | color(Color::Gold1) | bold) : (text("· ") | color(Color::GrayDark))));
         Element skinText = text(dispSkin) | color(skinColor);
-        if (w.isCustom || isKuro) skinText = skinText | bold;
+        if (w.isCustom || isKuro || isNoct) skinText = skinText | bold;
         if (isKuro) skinText = skinText | bgcolor(Color::RGB(15, 45, 65));
+        else if (isNoct) skinText = skinText | bgcolor(Color::RGB(55, 10, 45));
 
         Element row = hbox({
             text(" " + w.weaponName) | color(nameColor) | bold | size(WIDTH, EQUAL, 10),
@@ -253,6 +304,9 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
             filler(),
             g_selectedPlayerInfo.hasKuronami
                 ? (hbox({ text(" [ 🌊 КУРОНАМИ: " + (g_selectedPlayerInfo.kuronamiWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.kuronamiWeapon) + " ] ") | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 65)), text(" ") }))
+                : text(""),
+            g_selectedPlayerInfo.hasNocturnum
+                ? (hbox({ text(" [ 🗡️ ОСТРИЁ ТЬМЫ: " + (g_selectedPlayerInfo.nocturnumWeapon.empty() ? "ФАНТОМ" : g_selectedPlayerInfo.nocturnumWeapon) + " ] ") | bold | color(Color::MagentaLight) | bgcolor(Color::RGB(55, 10, 45)), text(" ") }))
                 : text(""),
             (loadout.loaded && customCount <= 2)
                 ? (hbox({ text(" [ ⚡ ВНИМАНИЕ: БУСТЕР (" + std::to_string(customCount) + " ск.) ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(70, 15, 15)), text(" ") }))
