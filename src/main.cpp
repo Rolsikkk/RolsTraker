@@ -39,7 +39,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.8.1";
+const std::string CURRENT_VERSION = "v2.9.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -597,6 +597,15 @@ struct PlayerInfo {
     bool isReconnectable = true;
     std::string connectionStatus = "";
     bool isMuted = false;
+
+    // Booster and Party Detection
+    bool isBooster = false;
+    int customSkinCount = -1;
+    bool skinsLoaded = false;
+    int detectedPartySize = 0;
+    int detectedSharedMatches = 0;
+    std::string detectedPartyLabel = "";
+    std::string detectedPartyPartners = "";
 };
 
 // Global view state
@@ -2195,13 +2204,32 @@ static void fetchPlayerLoadoutDirect(const Session& session, const std::string& 
 }
 
 static std::string g_lastLoadedMatchId = "";
+static std::chrono::steady_clock::time_point g_lastLoadoutFetchTime;
 
 static void updateMatchLoadouts(const Session& session, const MatchState& state) {
     if (session.accessToken.empty() || state.matchId.empty()) return;
     if (state.phase != "coregame" && state.phase != "pregame") return;
-    if (g_lastLoadedMatchId == state.matchId) return;
+
+    auto now = std::chrono::steady_clock::now();
+    bool matchChanged = (g_lastLoadedMatchId != state.matchId);
+    bool allLoaded = true;
+    {
+        std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+        for (const auto& p : state.players) {
+            if (!p.puuid.empty() && (!g_playerLoadouts.count(p.puuid) || !g_playerLoadouts[p.puuid].loaded)) {
+                allLoaded = false;
+                break;
+            }
+        }
+    }
+
+    if (!matchChanged && allLoaded) return;
+    if (!matchChanged && std::chrono::duration_cast<std::chrono::seconds>(now - g_lastLoadoutFetchTime).count() < 3) {
+        return;
+    }
 
     g_lastLoadedMatchId = state.matchId;
+    g_lastLoadoutFetchTime = now;
     std::string matchId = state.matchId;
     std::string phase = state.phase;
 
@@ -2230,6 +2258,212 @@ static void updateMatchLoadouts(const Session& session, const MatchState& state)
             if (res.statusCode == 200) {
                 parseMatchLoadoutsResponse(res.body, session);
             }
+        }
+    }).detach();
+}
+
+struct DetectedPartyInfo {
+    int partyNumber = 0;
+    int partySize = 0;
+    int sharedMatches = 0;
+    std::string partyLabel = "";
+    std::vector<std::string> partnerNames;
+    std::string partyId = "";
+};
+
+static std::map<std::string, std::vector<std::string>> g_playerMatchHistoryCache;
+static std::map<std::string, DetectedPartyInfo> g_detectedParties;
+static std::mutex g_partyDetectionMutex;
+static std::string g_lastPartyCheckMatchId = "";
+static bool g_partyCheckRunning = false;
+static std::chrono::steady_clock::time_point g_lastPartyCheckTime;
+
+static void detectPartiesFromMatchHistory(const Session& session, const MatchState& state) {
+    if (session.accessToken.empty() || session.pdHost.empty()) return;
+    if (state.matchId.empty() || (state.phase != "coregame" && state.phase != "pregame")) return;
+
+    auto now = std::chrono::steady_clock::now();
+    bool matchChanged = (g_lastPartyCheckMatchId != state.matchId);
+    
+    bool allCached = true;
+    {
+        std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+        if (g_partyCheckRunning) return;
+        for (const auto& p : state.players) {
+            if (!p.puuid.empty() && !g_playerMatchHistoryCache.count(p.puuid)) {
+                allCached = false;
+                break;
+            }
+        }
+    }
+
+    if (!matchChanged && allCached) return;
+    if (!matchChanged && std::chrono::duration_cast<std::chrono::seconds>(now - g_lastPartyCheckTime).count() < 4) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+        g_partyCheckRunning = true;
+        g_lastPartyCheckMatchId = state.matchId;
+        g_lastPartyCheckTime = now;
+    }
+
+    MatchState stateCopy = state;
+    Session sessionCopy = session;
+
+    std::thread([sessionCopy, stateCopy]() {
+        try {
+            std::string clientPlatform = getClientPlatformBase64();
+            std::map<std::string, std::string> pdHeaders = {
+                {"Authorization", "Bearer " + sessionCopy.accessToken},
+                {"X-Riot-Entitlements-JWT", sessionCopy.token},
+                {"X-Riot-ClientPlatform", clientPlatform},
+                {"X-Riot-ClientVersion", sessionCopy.clientVersion}
+            };
+
+            // 1. Fetch recent 20 match history for players who are not cached yet
+            for (const auto& p : stateCopy.players) {
+                if (p.puuid.empty()) continue;
+                bool needsFetch = false;
+                {
+                    std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                    if (!g_playerMatchHistoryCache.count(p.puuid)) {
+                        needsFetch = true;
+                    }
+                }
+                if (needsFetch) {
+                    auto histRes = httpRequest("GET", sessionCopy.pdHost, 443, "/match-history/v1/history/" + p.puuid + "?startIndex=0&endIndex=20", pdHeaders, "", true, false);
+                    if (histRes.statusCode == 200) {
+                        try {
+                            auto histJ = json::parse(histRes.body);
+                            std::vector<std::string> mIds;
+                            if (histJ.contains("History") && histJ["History"].is_array()) {
+                                for (const auto& item : histJ["History"]) {
+                                    std::string mid = getJsonKeyStr(item, {"MatchID", "matchId"});
+                                    if (!mid.empty()) {
+                                        mIds.push_back(mid);
+                                    }
+                                }
+                            }
+                            {
+                                std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                                if (g_playerMatchHistoryCache.size() > 500) {
+                                    g_playerMatchHistoryCache.erase(g_playerMatchHistoryCache.begin());
+                                }
+                                g_playerMatchHistoryCache[p.puuid] = mIds;
+                            }
+                        } catch (...) {}
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                }
+            }
+
+            // 2. Separate players by team
+            std::vector<PlayerInfo> team1, team2;
+            for (const auto& p : stateCopy.players) {
+                if (p.teamId == "Red" || p.teamId == "Defender") {
+                    team1.push_back(p);
+                } else if (p.teamId == "Blue" || p.teamId == "Attacker") {
+                    team2.push_back(p);
+                } else {
+                    team1.push_back(p);
+                }
+            }
+
+            std::map<std::string, DetectedPartyInfo> newDetectedParties;
+            int partyCounter = 1;
+
+            auto analyzeTeam = [&](const std::vector<PlayerInfo>& team) {
+                int n = (int)team.size();
+                if (n < 2) return;
+
+                // Build adjacency matrix for shared matches
+                std::vector<std::vector<int>> shared(n, std::vector<int>(n, 0));
+                for (int i = 0; i < n; ++i) {
+                    for (int j = i + 1; j < n; ++j) {
+                        std::vector<std::string> histI, histJ;
+                        {
+                            std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                            if (g_playerMatchHistoryCache.count(team[i].puuid)) histI = g_playerMatchHistoryCache[team[i].puuid];
+                            if (g_playerMatchHistoryCache.count(team[j].puuid)) histJ = g_playerMatchHistoryCache[team[j].puuid];
+                        }
+                        int common = 0;
+                        for (const auto& m : histI) {
+                            if (std::find(histJ.begin(), histJ.end(), m) != histJ.end()) {
+                                common++;
+                            }
+                        }
+                        shared[i][j] = common;
+                        shared[j][i] = common;
+                    }
+                }
+
+                // Connected components (edges where shared >= 1)
+                std::vector<bool> visited(n, false);
+                for (int i = 0; i < n; ++i) {
+                    if (visited[i]) continue;
+                    std::vector<int> comp;
+                    std::vector<int> q = {i};
+                    visited[i] = true;
+                    size_t head = 0;
+                    while (head < q.size()) {
+                        int u = q[head++];
+                        comp.push_back(u);
+                        for (int v = 0; v < n; ++v) {
+                            if (!visited[v] && shared[u][v] >= 1) {
+                                visited[v] = true;
+                                q.push_back(v);
+                            }
+                        }
+                    }
+
+                    if (comp.size() >= 2) {
+                        int pSize = (int)comp.size();
+                        std::string pLabel = (pSize == 2 ? "ДУО" : (pSize == 3 ? "ТРИО" : (pSize == 4 ? "4-СТАК" : "5-СТАК")));
+                        std::string partyId = "hist_party_" + stateCopy.matchId.substr(0, std::min((size_t)8, stateCopy.matchId.size())) + "_" + std::to_string(partyCounter);
+                        
+                        for (int u : comp) {
+                            int maxShared = 0;
+                            std::vector<std::string> partners;
+                            for (int v : comp) {
+                                if (v != u) {
+                                    maxShared = std::max(maxShared, shared[u][v]);
+                                    std::string pName = team[v].gameName;
+                                    if (pName.empty()) pName = "Игрок";
+                                    partners.push_back(pName);
+                                }
+                            }
+                            DetectedPartyInfo dpi;
+                            dpi.partyNumber = partyCounter;
+                            dpi.partySize = pSize;
+                            dpi.sharedMatches = maxShared;
+                            dpi.partyLabel = pLabel;
+                            dpi.partnerNames = partners;
+                            dpi.partyId = partyId;
+                            newDetectedParties[team[u].puuid] = dpi;
+                        }
+                        partyCounter++;
+                    }
+                }
+            };
+
+            if (!team1.empty() && !team2.empty()) {
+                analyzeTeam(team1);
+                analyzeTeam(team2);
+            } else {
+                analyzeTeam(team1.empty() ? team2 : team1);
+            }
+
+            {
+                std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                g_detectedParties = newDetectedParties;
+            }
+        } catch (...) {}
+
+        {
+            std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+            g_partyCheckRunning = false;
         }
     }).detach();
 }
@@ -2359,8 +2593,17 @@ int main() {
                             
                             resolveDisplayNamesAndRanks(newSession, newState.players);
                             updateMatchLoadouts(newSession, newState);
-                        } else if (!newSession.puuid.empty()) {
-                            fetchPlayerLoadoutDirect(newSession, newSession.puuid);
+                            detectPartiesFromMatchHistory(newSession, newState);
+                        } else {
+                            g_lastLoadedMatchId = "";
+                            g_lastPartyCheckMatchId = "";
+                            {
+                                std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                                g_detectedParties.clear();
+                            }
+                            if (!newSession.puuid.empty()) {
+                                fetchPlayerLoadoutDirect(newSession, newSession.puuid);
+                            }
                         }
                     }
                 }
@@ -2518,10 +2761,35 @@ int main() {
                         g_selectedPlayerInfo.statsSource = sc.source;
                         g_selectedPlayerInfo.isLoading = false;
                     }
+                    {
+                        std::lock_guard<std::mutex> lkLoad(g_loadoutsMutex);
+                        if (g_playerLoadouts.count(g_selectedPuuid)) {
+                            const auto& pl = g_playerLoadouts[g_selectedPuuid];
+                            if (pl.loaded) {
+                                int cCount = 0;
+                                for (const auto& [wId, w] : pl.weapons) {
+                                    if (w.isCustom) cCount++;
+                                }
+                                g_selectedPlayerInfo.skinsLoaded = true;
+                                g_selectedPlayerInfo.customSkinCount = cCount;
+                                g_selectedPlayerInfo.isBooster = (cCount <= 2);
+                            }
+                        }
+                    }
+                    {
+                        std::lock_guard<std::mutex> lkParty(g_partyDetectionMutex);
+                        if (g_detectedParties.count(g_selectedPuuid)) {
+                            const auto& dpi = g_detectedParties[g_selectedPuuid];
+                            g_selectedPlayerInfo.detectedPartySize = dpi.partySize;
+                            g_selectedPlayerInfo.detectedSharedMatches = dpi.sharedMatches;
+                            g_selectedPlayerInfo.detectedPartyLabel = dpi.partyLabel;
+                            g_selectedPlayerInfo.detectedPartyPartners = dpi.partnerNames.empty() ? "" : dpi.partnerNames[0];
+                        }
+                    }
                 }
             }
 
-            // Sync players with latest background cached stats on each frame
+            // Sync players with latest background cached stats, loadouts, and detected parties
             {
                 std::lock_guard<std::mutex> lk(g_mutex);
                 for (auto& p : matchState.players) {
@@ -2553,6 +2821,44 @@ int main() {
                         p.isLoading = false;
                     }
                 }
+
+                // Sync loadout and booster status
+                {
+                    std::lock_guard<std::mutex> lkLoad(g_loadoutsMutex);
+                    for (auto& p : matchState.players) {
+                        if (g_playerLoadouts.count(p.puuid)) {
+                            const auto& pl = g_playerLoadouts[p.puuid];
+                            if (pl.loaded) {
+                                int cCount = 0;
+                                for (const auto& [wId, w] : pl.weapons) {
+                                    if (w.isCustom) cCount++;
+                                }
+                                p.skinsLoaded = true;
+                                p.customSkinCount = cCount;
+                                p.isBooster = (cCount <= 2);
+                            }
+                        }
+                    }
+                }
+
+                // Sync detected parties
+                {
+                    std::lock_guard<std::mutex> lkParty(g_partyDetectionMutex);
+                    for (auto& p : matchState.players) {
+                        if (g_detectedParties.count(p.puuid)) {
+                            const auto& dpi = g_detectedParties[p.puuid];
+                            p.detectedPartySize = dpi.partySize;
+                            p.detectedSharedMatches = dpi.sharedMatches;
+                            p.detectedPartyLabel = dpi.partyLabel;
+                            p.detectedPartyPartners = dpi.partnerNames.empty() ? "" : dpi.partnerNames[0];
+                            if (p.partyId.empty() || p.partyId == "00000000-0000-0000-0000-000000000000") {
+                                p.partyId = dpi.partyId;
+                            }
+                        }
+                    }
+                }
+
+                g_liveMatchState.players = matchState.players;
             }
             
             screen.PostEvent(ftxui::Event::Custom);

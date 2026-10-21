@@ -213,7 +213,10 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
         hbox({
             renderProfileTabs(PlayerProfileTab::SKINS),
             filler(),
-            text(" ★ Особых скинов: " + std::to_string(customCount) + " из " + std::to_string(std::min(19, std::max(19, totalWeapons))) + " ") | color(Color::YellowLight) | bold
+            (loadout.loaded && customCount <= 2)
+                ? (hbox({ text(" [ ⚡ ВНИМАНИЕ: БУСТЕР (" + std::to_string(customCount) + " ск.) ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(70, 15, 15)), text(" ") }))
+                : text(""),
+            text(" ★ Особых скинов: " + std::to_string(customCount) + " из " + std::to_string(std::min(19, std::max(19, totalWeapons))) + " ") | color((loadout.loaded && customCount <= 2) ? Color::RedLight : Color::YellowLight) | bold
         })
     });
 

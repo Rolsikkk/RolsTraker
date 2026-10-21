@@ -102,20 +102,48 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     Color curRankCol = getRankColorFTX(g_selectedPlayerInfo.rankTier > 2 ? g_selectedPlayerInfo.rankTier : g_selectedPlayerInfo.peakRankTier);
     Color pkRankCol = getRankColorFTX(g_selectedPlayerInfo.peakRankTier);
 
-    auto contentBox = vbox({
+    Elements headerItems = {
         hbox({
             text(" Игрок: ") | bold | color(Color::GrayLight),
             nameTitle,
             filler(),
             trackerBadge
-        }),
-        separator(),
-        hbox({
-            renderProfileTabs(PlayerProfileTab::STATS),
-            filler(),
-            text(" [ 📊 БОЕВАЯ СТАТИСТИКА ] ") | bold | color(Color::GreenLight)
-        }),
-        separator(),
+        })
+    };
+
+    if (g_selectedPlayerInfo.isBooster) {
+        std::string bText = " [ ⚡ ВНИМАНИЕ: ВОЗМОЖНЫЙ БУСТЕР — ";
+        if (g_selectedPlayerInfo.customSkinCount >= 0) {
+            bText += "ВСЕГО " + std::to_string(g_selectedPlayerInfo.customSkinCount) + " ИЗ 19 СКИНОВ В ИНВЕНТАРЕ";
+        } else {
+            bText += "МАЛО СКИНОВ В ИНВЕНТАРЕ";
+        }
+        bText += " ] ";
+        headerItems.push_back(text(bText) | bold | color(Color::RedLight) | bgcolor(Color::RGB(70, 15, 15)) | center);
+    }
+
+    if (g_selectedPlayerInfo.detectedPartySize >= 2) {
+        std::string pText = " [ 👥 В ПАЧКЕ: " + g_selectedPlayerInfo.detectedPartyLabel;
+        if (!g_selectedPlayerInfo.detectedPartyPartners.empty()) {
+            pText += " с " + g_selectedPlayerInfo.detectedPartyPartners;
+        }
+        if (g_selectedPlayerInfo.detectedSharedMatches > 0) {
+            pText += " (" + std::to_string(g_selectedPlayerInfo.detectedSharedMatches) + " общих игр из 20)";
+        }
+        pText += " ] ";
+        headerItems.push_back(text(pText) | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 60)) | center);
+    }
+
+    headerItems.push_back(separator());
+    headerItems.push_back(hbox({
+        renderProfileTabs(PlayerProfileTab::STATS),
+        filler(),
+        text(" [ 📊 БОЕВАЯ СТАТИСТИКА ] ") | bold | color(Color::GreenLight)
+    }));
+    headerItems.push_back(separator());
+
+    auto contentBox = vbox({
+        vbox(headerItems),
         hbox({
             // Left column: Combat Stats
             vbox({

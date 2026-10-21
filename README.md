@@ -15,6 +15,8 @@
 A lightning-fast, portable, terminal-based **Valorant stats tracker and lobby companion** built in C++20 with [FTXUI](https://github.com/ArthurSonzogni/FTXUI). It automatically detects your live lobby, displays detailed player stats directly from Tracker.gg, shows the selected map, and provides an instant one-click agent auto-picker!
 
 ### ✨ Key Features
+- 👥 **Background Party & Stack Detection (Recent 20 Games)**: Scans the last 20 matches of all lobby players in the background to detect who is queued together! Finds Duos, Trios, 4-stacks, and 5-stacks for both allies and enemies (where Riot completely hides party IDs), displaying vibrant color-coded badges (`#1 ДУО`, `#2 ТРИО`) and shared match counts.
+- ⚡ **Booster Detection via Equipped Weapon Skins**: Automatically inspects player weapon loadouts in the background. If a player has $\le 2$ custom skins across their entire 19-weapon loadout, they are flagged as `[БУСТЕР ⚡]` with skin counts and warning banners.
 - 🎨 **In-Game Weapon Skins Inspection**: Click on any player in the lobby to see their complete weapon loadout! All 19 weapons are neatly categorized into *Sidearms, SMGs, Shotguns, Rifles, Snipers, Heavies, Melee* exactly like in the in-game Valorant Arsenal, complete with chroma variants and custom skin highlights (`★`).
 - ⚡ **Instant Agent Auto-Picker**: Pick and lock any unlocked agent in seconds! Browse agents by roles (*Duelists, Initiators, Controllers, Sentinels*) or press `[P]` / click the picker button during Agent Select.
 - 🗺️ **Map Detection & Banner**: Clearly displays the current map prominently as soon as the pre-game lobby is generated.
@@ -44,6 +46,8 @@ A lightning-fast, portable, terminal-based **Valorant stats tracker and lobby co
 Молниеносный, автономный консольный **трекер статистики и помощник для Valorant**, написанный на C++20 с использованием библиотеки [FTXUI](https://github.com/ArthurSonzogni/FTXUI). Автоматически определяет лобби, загружает актуальную статистику игроков с Tracker.gg, отображает выпавшую карту и позволяет мгновенно выбирать (авто-пикать) агентов в один клик.
 
 ### ✨ Основные возможности
+- 👥 **Определение пачек по последним 20 играм (в фоне)**: Автоматически сканирует историю последних 20 матчей игроков прямо во время игры и находит, кто играет вместе! Безошибочно выявляет дуо, трио, 4-стаки и фулл-пати не только среди союзников, но и во вражеской команде (где Riot намеренно скрывает Party ID), с цветными бейджами (`#1 ДУО`, `#2 ТРИО`) и количеством общих матчей.
+- ⚡ **Детект бустеров по скинам оружия**: Фоновый анализ арсенала скинов игроков. Если у игрока в активной экипировке нет скинов или всего 1-2 скина на все 19 видов оружия, программа маркирует его как `[БУСТЕР ⚡]` прямо в таблице лобби и в карточке игрока.
 - 🎨 **Просмотр скинов оружия игроков в матче**: Нажмите на имя любого игрока в лобби, чтобы увидеть его полный экипированный арсенал оружия! Все 19 видов оружия аккуратно рассортированы по категориям (*Пистолеты, Пистолеты-пулемёты, Дробовики, Винтовки, Снайперские винтовки, Пулемёты, Холодное оружие*) точно так же, как в меню «Коллекция» в самом Валоранте, с отображением расцветок (хромов) и подсветкой особых скинов (`★`).
 - ⚡ **Мгновенный авто-пик агентов**: Выбирайте и фиксируйте любого доступного агента за долю секунды! Удобная сортировка по ролям (*Дуэлянты, Зачинщики, Специалисты, Стражи*), открытие по кнопке или горячей клавише `[P]`.
 - 🗺️ **Баннер карты в Pre-Game**: Крупное и четкое отображение выпавшей карты сразу после нахождения матча.

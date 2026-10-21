@@ -115,6 +115,7 @@ struct PartyColorInfo {
     int groupIndex;
     std::string ansiColor;
     std::string name;
+    int memberCount = 0;
 };
 
 inline std::string utf8_substr(const std::string& str, size_t max_len) {
@@ -207,7 +208,20 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
         if (!p.partyId.empty() && partyGroupMap.count(p.partyId)) {
             auto pInfo = partyGroupMap.at(p.partyId);
             ftxui::Color pColor = FTX_PARTY_COLORS[(pInfo.groupIndex - 1) % FTX_PARTY_COLORS.size()];
-            partyIcon = ftxui::text("#" + std::to_string(pInfo.groupIndex)) | ftxui::color(pColor) | ftxui::bold;
+            std::string pLabel = "";
+            if (p.detectedPartySize >= 2) {
+                pLabel = p.detectedPartyLabel;
+            } else if (pInfo.memberCount >= 2) {
+                if (pInfo.memberCount == 2) pLabel = "ДУО";
+                else if (pInfo.memberCount == 3) pLabel = "ТРИО";
+                else if (pInfo.memberCount == 4) pLabel = "4-СТАК";
+                else if (pInfo.memberCount >= 5) pLabel = "5-СТАК";
+            }
+            std::string fullPartyStr = "#" + std::to_string(pInfo.groupIndex);
+            if (!pLabel.empty()) {
+                fullPartyStr += " " + pLabel;
+            }
+            partyIcon = ftxui::text(" " + fullPartyStr + " ") | ftxui::color(pColor) | ftxui::bold;
         }
 
         ftxui::Element nameElement;
@@ -227,12 +241,17 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
             nameParts.push_back(ftxui::text("[MUTE] ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
         }
 
-        // Smurf / Boosted detection (based on tracker kd)
-        if (p.kdRatio >= 1.4f && p.matchesPlayed >= 5 && !p.isPrivate) {
-            float wr = (float)p.matchesWon / p.matchesPlayed;
-            if (wr >= 0.55f) {
-                nameParts.push_back(ftxui::text(" [SMURF ⚠️]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
+        // Smurf & Booster detection
+        bool isSmurfKd = (p.kdRatio >= 1.4f && p.matchesPlayed >= 5 && !p.isPrivate && ((float)p.matchesWon / p.matchesPlayed >= 0.55f));
+        if (isSmurfKd) {
+            nameParts.push_back(ftxui::text(" [SMURF ⚠️]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
+        }
+        if (p.isBooster) {
+            std::string bStr = " [БУСТЕР ⚡]";
+            if (p.customSkinCount >= 0) {
+                bStr = " [БУСТЕР (" + std::to_string(p.customSkinCount) + " ск.) ⚡]";
             }
+            nameParts.push_back(ftxui::text(bStr) | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
         }
 
         nameElement = ftxui::hbox(nameParts) | ftxui::reflect(g_playerBoxes[p.puuid]);
@@ -350,7 +369,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     int nextGroupIdx = 1;
     for (const auto& p : state.players) {
         if (!p.partyId.empty() && p.partyId != "00000000-0000-0000-0000-000000000000" && partyCounts[p.partyId] > 1 && partyGroupMap.find(p.partyId) == partyGroupMap.end()) {
-            partyGroupMap[p.partyId] = {nextGroupIdx, "", ""};
+            partyGroupMap[p.partyId] = {nextGroupIdx, "", "", partyCounts[p.partyId]};
             nextGroupIdx++;
         }
     }
@@ -378,7 +397,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     }
 
     auto termSize = ftxui::Terminal::Size();
-    bool sideBySide = (termSize.dimx >= 115);
+    bool sideBySide = (termSize.dimx >= 155);
 
     ftxui::Element teamsElement;
     if (!team1.empty() && !team2.empty()) {
