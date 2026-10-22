@@ -484,6 +484,8 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     std::string penaltiesStatus;
     { std::lock_guard<std::mutex> lk(g_penaltiesMutex); penaltiesStatus = g_penaltiesStatus; }
 
+    g_playerBoxes.clear();
+
     std::vector<ftxui::Element> uiElements;
     // Compact Top bar
     uiElements.push_back(ftxui::hbox({

@@ -41,7 +41,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "shell32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.9.5";
+const std::string CURRENT_VERSION = "v2.9.6";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -832,31 +832,22 @@ Session getSession(const Lockfile& lock) {
         return s;
     }
 
-    static std::string cachedPid = "";
-    static std::pair<std::string, std::string> cachedShard = {"", ""};
-    
-    if (lock.pid != cachedPid || cachedShard.first.empty()) {
-        cachedPid = lock.pid;
-        cachedShard = readShardFromLog();
+    auto regRes = httpRequest("GET", "127.0.0.1", lock.port, "/riotclient/region-locale", {{"Authorization", authHeader}}, "", true, true);
+    if (regRes.statusCode == 200) {
+        try {
+            auto j = json::parse(regRes.body);
+            s.region = getJsonKeyStr(j, {"region"});
+            for (auto& c : s.region) c = tolower(c);
+            if (s.region == "latam" || s.region == "br") s.shard = "na";
+            else s.shard = s.region;
+        } catch (...) {}
     }
-    
-    auto logShard = cachedShard;
-    if (!logShard.first.empty()) {
-        s.region = logShard.first;
-        s.shard = logShard.second;
-    } else {
-        auto regRes = httpRequest("GET", "127.0.0.1", lock.port, "/riotclient/region-locale", {{"Authorization", authHeader}}, "", true, true);
-        if (regRes.statusCode == 200) {
-            try {
-                auto j = json::parse(regRes.body);
-                s.region = getJsonKeyStr(j, {"region"});
-                for (auto& c : s.region) c = tolower(c);
-                if (s.region == "latam" || s.region == "br") s.shard = "na";
-                else s.shard = s.region;
-                if (!s.region.empty() && !s.shard.empty()) {
-                    cachedShard = {s.region, s.shard};
-                }
-            } catch (...) {}
+
+    if (s.region.empty()) {
+        auto logShard = readShardFromLog();
+        if (!logShard.first.empty()) {
+            s.region = logShard.first;
+            s.shard = logShard.second;
         }
     }
 
@@ -1849,8 +1840,12 @@ static const std::vector<DefaultWeaponMeta> DEFAULT_WEAPONS = {
 };
 
 static bool isPlayableWeapon(const std::string& weaponUuid) {
+    std::string wLower = weaponUuid;
+    for (auto& c : wLower) c = tolower(c);
     for (const auto& dw : DEFAULT_WEAPONS) {
-        if (dw.uuid == weaponUuid) return true;
+        std::string dLower = dw.uuid;
+        for (auto& c : dLower) c = tolower(c);
+        if (dLower == wLower) return true;
     }
     return false;
 }
@@ -1950,19 +1945,45 @@ static void parseWeaponsJson(const std::string& jsonStr) {
                     sm.skinName = sName;
                     sm.weaponUuid = wUuid;
                     sm.isStandard = isStd;
-                    g_skinMetaMap[sUuid] = sm;
                     
+                    std::string sUuidLower = sUuid;
+                    for (auto& ch : sUuidLower) ch = tolower(ch);
+                    g_skinMetaMap[sUuid] = sm;
+                    g_skinMetaMap[sUuidLower] = sm;
+                    
+                    if (s.contains("levels") && s["levels"].is_array()) {
+                        for (const auto& l : s["levels"]) {
+                            std::string lUuid = getJsonKeyStr(l, {"uuid"});
+                            if (!lUuid.empty()) {
+                                std::string lUuidLower = lUuid;
+                                for (auto& ch : lUuidLower) ch = tolower(ch);
+                                g_skinMetaMap[lUuid] = sm;
+                                g_skinMetaMap[lUuidLower] = sm;
+                            }
+                        }
+                    }
+
                     if (s.contains("chromas") && s["chromas"].is_array()) {
                         for (const auto& c : s["chromas"]) {
                             std::string cUuid = getJsonKeyStr(c, {"uuid"});
                             std::string cName = getJsonKeyStr(c, {"displayName"});
                             if (cUuid.empty()) continue;
                             
+                            std::string cUuidLower = cUuid;
+                            for (auto& ch : cUuidLower) ch = tolower(ch);
+
                             ChromaMetadata cm;
                             cm.chromaUuid = cUuid;
                             cm.skinUuid = sUuid;
                             cm.variantName = extractChromaVariant(cName, sName);
                             g_chromaMetaMap[cUuid] = cm;
+                            g_chromaMetaMap[cUuidLower] = cm;
+
+                            // Also index chroma in skinMetaMap as fallback
+                            if (!g_skinMetaMap.count(cUuid)) {
+                                g_skinMetaMap[cUuid] = sm;
+                                g_skinMetaMap[cUuidLower] = sm;
+                            }
                         }
                     }
                 }
@@ -2016,8 +2037,15 @@ static WeaponSkinInfo resolveWeaponSkin(const std::string& weaponUuid, const std
     int catOrd = 4;
     int wOrd = 10;
 
+    std::string sUuidLower = skinUuid;
+    for (auto& c : sUuidLower) c = tolower(c);
+    std::string cUuidLower = chromaUuid;
+    for (auto& c : cUuidLower) c = tolower(c);
+    std::string wUuidLower = weaponUuid;
+    for (auto& c : wUuidLower) c = tolower(c);
+
     for (const auto& dw : DEFAULT_WEAPONS) {
-        if (dw.uuid == weaponUuid) {
+        if (_stricmp(dw.uuid.c_str(), weaponUuid.c_str()) == 0) {
             wName = dw.name;
             wCat = dw.category;
             catOrd = dw.catOrder;
@@ -2030,9 +2058,13 @@ static WeaponSkinInfo resolveWeaponSkin(const std::string& weaponUuid, const std
         std::lock_guard<std::mutex> lk(g_weaponDbMutex);
         if (g_weaponNameMap.count(weaponUuid)) {
             wName = g_weaponNameMap[weaponUuid];
+        } else if (g_weaponNameMap.count(wUuidLower)) {
+            wName = g_weaponNameMap[wUuidLower];
         }
         if (g_weaponCategoryMap.count(weaponUuid)) {
             wCat = g_weaponCategoryMap[weaponUuid];
+        } else if (g_weaponCategoryMap.count(wUuidLower)) {
+            wCat = g_weaponCategoryMap[wUuidLower];
         }
     }
 
@@ -2048,6 +2080,9 @@ static WeaponSkinInfo resolveWeaponSkin(const std::string& weaponUuid, const std
         if (g_skinMetaMap.count(skinUuid)) {
             sName = g_skinMetaMap[skinUuid].skinName;
             isStd = g_skinMetaMap[skinUuid].isStandard;
+        } else if (g_skinMetaMap.count(sUuidLower)) {
+            sName = g_skinMetaMap[sUuidLower].skinName;
+            isStd = g_skinMetaMap[sUuidLower].isStandard;
         }
     }
 
@@ -2064,6 +2099,8 @@ static WeaponSkinInfo resolveWeaponSkin(const std::string& weaponUuid, const std
             std::lock_guard<std::mutex> lk(g_weaponDbMutex);
             if (g_chromaMetaMap.count(chromaUuid)) {
                 varName = g_chromaMetaMap[chromaUuid].variantName;
+            } else if (g_chromaMetaMap.count(cUuidLower)) {
+                varName = g_chromaMetaMap[cUuidLower].variantName;
             }
         }
         wsi.chromaName = varName;
@@ -2137,14 +2174,24 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
                                 }
                             }
                         }
-                        WeaponSkinInfo wsi = resolveWeaponSkin(weaponId, skinId, chromaId);
-                        pLoadout.weapons[weaponId] = wsi;
+                        std::string canonWeaponUuid = weaponId;
+                        for (const auto& dw : DEFAULT_WEAPONS) {
+                            if (_stricmp(dw.uuid.c_str(), weaponId.c_str()) == 0) {
+                                canonWeaponUuid = dw.uuid;
+                                break;
+                            }
+                        }
+                        WeaponSkinInfo wsi = resolveWeaponSkin(canonWeaponUuid, skinId, chromaId);
+                        pLoadout.weapons[canonWeaponUuid] = wsi;
                     }
                 }
                 
                 {
+                    std::string sLower = subject;
+                    for (auto& c : sLower) c = tolower(c);
                     std::lock_guard<std::mutex> lk(g_loadoutsMutex);
                     g_playerLoadouts[subject] = pLoadout;
+                    g_playerLoadouts[sLower] = pLoadout;
                 }
             }
         }
@@ -2250,6 +2297,10 @@ static void updateMatchLoadouts(const Session& session, const MatchState& state)
 
     auto now = std::chrono::steady_clock::now();
     bool matchChanged = (g_lastLoadedMatchId != state.matchId);
+    if (matchChanged) {
+        std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+        g_playerLoadouts.clear();
+    }
     bool allLoaded = true;
     {
         std::lock_guard<std::mutex> lk(g_loadoutsMutex);
