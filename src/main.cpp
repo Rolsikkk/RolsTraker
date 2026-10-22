@@ -41,7 +41,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "shell32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.9.6";
+const std::string CURRENT_VERSION = "v2.9.7";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -797,8 +797,9 @@ std::pair<std::string, std::string> readShardFromLog() {
         if (file.is_open()) {
             std::string line;
             std::regex re(R"(glz-([a-zA-Z0-9]+)-1\.([a-zA-Z0-9]+)\.a\.pvp\.net)", std::regex::icase);
+            std::regex rePd(R"(https://pd\.([a-zA-Z0-9]+)\.a\.pvp\.net)", std::regex::icase);
             int lineCount = 0;
-            while (std::getline(file, line) && lineCount < 3000) {
+            while (std::getline(file, line) && lineCount < 5000) {
                 lineCount++;
                 if (line.find("glz-") != std::string::npos) {
                     std::smatch match;
@@ -808,6 +809,13 @@ std::pair<std::string, std::string> readShardFromLog() {
                         for (auto& c : region) c = tolower(c);
                         for (auto& c : shard) c = tolower(c);
                         return {region, shard};
+                    }
+                } else if (line.find("pd.") != std::string::npos) {
+                    std::smatch match;
+                    if (std::regex_search(line, match, rePd) && match.size() >= 2) {
+                        std::string shard = match[1].str();
+                        for (auto& c : shard) c = tolower(c);
+                        return {shard, shard};
                     }
                 }
             }
@@ -832,22 +840,24 @@ Session getSession(const Lockfile& lock) {
         return s;
     }
 
-    auto regRes = httpRequest("GET", "127.0.0.1", lock.port, "/riotclient/region-locale", {{"Authorization", authHeader}}, "", true, true);
-    if (regRes.statusCode == 200) {
-        try {
-            auto j = json::parse(regRes.body);
-            s.region = getJsonKeyStr(j, {"region"});
-            for (auto& c : s.region) c = tolower(c);
-            if (s.region == "latam" || s.region == "br") s.shard = "na";
-            else s.shard = s.region;
-        } catch (...) {}
-    }
-
-    if (s.region.empty()) {
-        auto logShard = readShardFromLog();
-        if (!logShard.first.empty()) {
-            s.region = logShard.first;
-            s.shard = logShard.second;
+    // 1. Prioritize reading the actual active game server shard from VALORANT ShooterGame.log
+    auto logShard = readShardFromLog();
+    if (!logShard.first.empty()) {
+        s.region = logShard.first;
+        s.shard = logShard.second;
+    } else {
+        auto regRes = httpRequest("GET", "127.0.0.1", lock.port, "/riotclient/region-locale", {{"Authorization", authHeader}}, "", true, true);
+        if (regRes.statusCode == 200) {
+            try {
+                auto j = json::parse(regRes.body);
+                std::string r = getJsonKeyStr(j, {"region"});
+                for (auto& c : r) c = tolower(c);
+                if (!r.empty() && r != "na") {
+                    s.region = r;
+                    if (s.region == "latam" || s.region == "br") s.shard = "na";
+                    else s.shard = s.region;
+                }
+            } catch (...) {}
         }
     }
 
