@@ -536,7 +536,6 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         ftxui::filler() | ftxui::flex,
         (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) : ftxui::text(""))
     }));
-    uiElements.push_back(ftxui::text(" Нажмите на имя любого игрока, чтобы увидеть все его скины оружия ") | ftxui::color(ftxui::Color::Cyan) | ftxui::center);
 
     return ftxui::vbox(std::move(uiElements)) | ftxui::border;
 }
