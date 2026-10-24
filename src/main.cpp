@@ -24,7 +24,7 @@
 #include <nlohmann/json.hpp>
 #include <tlhelp32.h>
 #include <filesystem>
-#include <shellapi.h>
+#include <exception>
 
 // FTXUI Headers
 #include <ftxui/dom/elements.hpp>
@@ -38,10 +38,9 @@ using json = nlohmann::json;
 
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "ws2_32.lib")
-#pragma comment(lib, "shell32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.9.7";
+const std::string CURRENT_VERSION = "v2.9.8";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -1784,6 +1783,160 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
     }
 }
 
+// -----------------------------------------------------------------------------
+// Safe URL launcher
+// -----------------------------------------------------------------------------
+// ShellExecute(A) resolves the default browser through shell32/windows.storage.
+// On this machine (Windows 11 22000) that path crashes with an access violation
+// inside windows.storage.dll (0xc0000005 at windows.storage.dll+0x203730) - the
+// same crash that is visible in explorer.exe crash dumps. Opening a link used to
+// take the whole application down with it, so the default browser command is
+// now resolved from the registry and started directly with CreateProcessW.
+// -----------------------------------------------------------------------------
+
+static std::wstring regReadString(HKEY root, const std::wstring& subkey, const wchar_t* valueName) {
+    DWORD size = 0;
+    DWORD flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ;
+    if (RegGetValueW(root, subkey.c_str(), valueName, flags, nullptr, nullptr, &size) != ERROR_SUCCESS || size < sizeof(wchar_t)) {
+        return L"";
+    }
+    std::wstring buf(size / sizeof(wchar_t), L'\0');
+    if (RegGetValueW(root, subkey.c_str(), valueName, flags, nullptr, buf.data(), &size) != ERROR_SUCCESS) {
+        return L"";
+    }
+    while (!buf.empty() && buf.back() == L'\0') buf.pop_back();
+    return buf;
+}
+
+static std::wstring expandEnv(const std::wstring& s) {
+    if (s.empty() || s.find(L'%') == std::wstring::npos) return s;
+    DWORD len = ExpandEnvironmentStringsW(s.c_str(), nullptr, 0);
+    if (len == 0) return s;
+    std::wstring out(len, L'\0');
+    if (ExpandEnvironmentStringsW(s.c_str(), out.data(), len) == 0) return s;
+    while (!out.empty() && out.back() == L'\0') out.pop_back();
+    return out;
+}
+
+static std::wstring urlProgId(const wchar_t* scheme) {
+    std::wstring key = L"Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\";
+    key += scheme;
+    key += L"\\UserChoice";
+    return regReadString(HKEY_CURRENT_USER, key, L"ProgId");
+}
+
+static std::wstring urlOpenCommand(const std::wstring& progId) {
+    if (progId.empty()) return L"";
+    std::wstring sub = progId + L"\\shell\\open\\command";
+    std::wstring cmd = regReadString(HKEY_CLASSES_ROOT, sub, nullptr);
+    if (cmd.empty()) cmd = regReadString(HKEY_CURRENT_USER, L"Software\\Classes\\" + sub, nullptr);
+    if (cmd.empty()) cmd = regReadString(HKEY_LOCAL_MACHINE, L"Software\\Classes\\" + sub, nullptr);
+    return cmd;
+}
+
+static std::wstring substituteUrl(const std::wstring& cmdTemplate, const std::wstring& quotedUrl) {
+    std::wstring out;
+    out.reserve(cmdTemplate.size() + quotedUrl.size());
+    bool replaced = false;
+    for (size_t i = 0; i < cmdTemplate.size(); ++i) {
+        if (cmdTemplate[i] == L'%' && i + 1 < cmdTemplate.size() &&
+            (cmdTemplate[i + 1] == L'1' || cmdTemplate[i + 1] == L'l' || cmdTemplate[i + 1] == L'L')) {
+            out += quotedUrl;
+            ++i;
+            replaced = true;
+        } else {
+            out += cmdTemplate[i];
+        }
+    }
+    if (!replaced) out += L" " + quotedUrl;
+    return out;
+}
+
+static bool startDetachedProcess(const std::wstring& cmdline) {
+    if (cmdline.empty()) return false;
+    std::wstring cmd = cmdline;
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE,
+                             CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    if (ok) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return true;
+    }
+    return false;
+}
+
+static std::wstring envVar(const wchar_t* name) {
+    wchar_t buf[MAX_PATH * 2];
+    DWORD n = GetEnvironmentVariableW(name, buf, (DWORD)(sizeof(buf) / sizeof(buf[0])));
+    if (n == 0 || n >= sizeof(buf) / sizeof(buf[0])) return L"";
+    return std::wstring(buf, n);
+}
+
+static bool launchUrlInBrowser(const std::string& url) {
+    if (url.empty()) return false;
+    std::wstring wideUrl = utf8ToWide(url);
+    std::wstring quotedUrl = L"\"" + wideUrl + L"\"";
+
+    // 1) Use the registered default handler (Chrome/Edge/Firefox/... command line)
+    for (const wchar_t* scheme : {L"https", L"http"}) {
+        std::wstring progId = urlProgId(scheme);
+        if (progId.empty()) continue;
+        std::wstring cmd = urlOpenCommand(progId);
+        if (cmd.empty()) continue;
+        cmd = expandEnv(cmd);
+        if (startDetachedProcess(substituteUrl(cmd, quotedUrl))) {
+            Log("Opened URL via registered handler (" + std::string(progId.begin(), progId.end()) + ")");
+            return true;
+        }
+    }
+
+    // 2) Well-known browser locations as a fallback
+    const std::wstring pf = envVar(L"ProgramFiles");
+    const std::wstring pf86 = envVar(L"ProgramFiles(x86)");
+    const std::wstring local = envVar(L"LOCALAPPDATA");
+    std::vector<std::wstring> exeCandidates;
+    auto addBrowser = [&exeCandidates](const std::wstring& dir, const std::wstring& rel) {
+        if (dir.empty()) return;
+        std::wstring path = dir + L"\\" + rel;
+        DWORD attr = GetFileAttributesW(path.c_str());
+        if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) exeCandidates.push_back(path);
+    };
+    addBrowser(pf, L"Google\\Chrome\\Application\\chrome.exe");
+    addBrowser(pf86, L"Google\\Chrome\\Application\\chrome.exe");
+    addBrowser(local, L"Google\\Chrome\\Application\\chrome.exe");
+    addBrowser(pf, L"Microsoft\\Edge\\Application\\msedge.exe");
+    addBrowser(pf86, L"Microsoft\\Edge\\Application\\msedge.exe");
+    addBrowser(pf, L"Mozilla Firefox\\firefox.exe");
+    addBrowser(pf86, L"Mozilla Firefox\\firefox.exe");
+    addBrowser(pf, L"BraveSoftware\\Brave-Browser\\Application\\brave.exe");
+    addBrowser(local, L"BraveSoftware\\Brave-Browser\\Application\\brave.exe");
+    addBrowser(pf, L"Yandex\\YandexBrowser\\Application\\browser.exe");
+    addBrowser(local, L"Yandex\\YandexBrowser\\Application\\browser.exe");
+    addBrowser(local, L"Programs\\Opera\\opera.exe");
+    addBrowser(pf, L"Vivaldi\\Application\\vivaldi.exe");
+    for (const auto& exe : exeCandidates) {
+        if (startDetachedProcess(L"\"" + exe + L"\" \"" + wideUrl + L"\"")) {
+            Log("Opened URL via browser fallback: " + std::string(exe.begin(), exe.end()));
+            return true;
+        }
+    }
+
+    // 3) Last resort: let cmd.exe do it in a separate process, so a broken shell
+    //    can no longer crash our application.
+    std::wstring comspec = envVar(L"COMSPEC");
+    if (comspec.empty()) comspec = L"cmd.exe";
+    if (startDetachedProcess(L"\"" + comspec + L"\" /c start \"\" " + quotedUrl)) {
+        Log("Opened URL via cmd.exe fallback");
+        return true;
+    }
+
+    Log("Failed to open URL in browser: " + url);
+    return false;
+}
+
 void openTrackerInBrowser(std::string gName, std::string tLine) {
     if (gName.empty() && !g_selectedPuuid.empty()) {
         std::lock_guard<std::mutex> lk(g_mutex);
@@ -1803,7 +1956,7 @@ void openTrackerInBrowser(std::string gName, std::string tLine) {
     }
     std::string url = "https://tracker.gg/valorant/profile/riot/" + urlEncode(gName) + "%23" + urlEncode(tLine) + "/overview";
     std::thread([url]() {
-        ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, SW_SHOWNORMAL);
+        launchUrlInBrowser(url);
     }).detach();
 }
 
@@ -2579,16 +2732,59 @@ BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
     return FALSE;
 }
 
+// Last-chance diagnostics: write the crash location into debug.log before the
+// process goes away, so future crashes can be identified without a debugger.
+static LONG WINAPI logUnhandledException(EXCEPTION_POINTERS* ep) {
+    std::ostringstream oss;
+    oss << "Unhandled exception 0x" << std::hex << (unsigned long)ep->ExceptionRecord->ExceptionCode
+        << " at 0x" << (unsigned long long)(uintptr_t)ep->ExceptionRecord->ExceptionAddress;
+    HMODULE hMod = nullptr;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(ep->ExceptionRecord->ExceptionAddress), &hMod) && hMod) {
+        char modPath[MAX_PATH] = {};
+        if (GetModuleFileNameA(hMod, modPath, MAX_PATH)) {
+            oss << " in " << modPath;
+            HMODULE self = GetModuleHandleA(nullptr);
+            if (self && hMod != self) {
+                // Report the offset inside the foreign module as well.
+                oss << " +0x" << (unsigned long long)((uintptr_t)ep->ExceptionRecord->ExceptionAddress - (uintptr_t)hMod);
+            }
+        }
+    }
+    Log(oss.str());
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void logTerminateHandler() {
+    try {
+        std::exception_ptr eptr = std::current_exception();
+        if (eptr) {
+            std::rethrow_exception(eptr);
+        }
+        Log("std::terminate called without an active exception");
+    } catch (const std::exception& e) {
+        Log(std::string("Uncaught exception: ") + e.what());
+    } catch (...) {
+        Log("Uncaught unknown exception");
+    }
+    std::_Exit(1);
+}
+
 int main() {
     Log("Starting main()");
+    SetUnhandledExceptionFilter(logUnhandledException);
+    std::set_terminate(logTerminateHandler);
     loadSettings();
-    if (!g_discordClientId.empty()) initDiscordRpc(g_discordClientId);
+    Log("Settings loaded");
+    if (!g_discordClientId.empty()) { initDiscordRpc(g_discordClientId); Log("Discord RPC init done"); }
     
     // Set console buffer cols and lines
+    Log("Setting console mode");
     system("mode con cols=155 lines=42");
     
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
+    Log("WSAStartup done");
 
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
@@ -2619,12 +2815,22 @@ int main() {
         }
         MoveWindow(console, startX, startY, targetW, targetH, TRUE);
     }
+    Log("Console window set");
 
-    std::thread(checkAutoUpdate).detach();
+    std::thread([]() {
+        try { checkAutoUpdate(); }
+        catch (...) { Log("Auto-update thread failed"); }
+    }).detach();
+    Log("Starting initWeaponsDatabase");
     initWeaponsDatabase();
+    Log("initWeaponsDatabase done");
 
+    Log("Starting getAgentMap");
     auto agentMap = getAgentMap();
+    Log("getAgentMap done");
+    Log("Starting getMapNameMap");
     auto mapNameMap = getMapNameMap();
+    Log("getMapNameMap done");
     
     g_globalAgentMap = agentMap;
     g_globalMapNameMap = mapNameMap;
@@ -2633,7 +2839,22 @@ int main() {
     Session session;
     MatchState matchState;
 
-    auto screen = ftxui::ScreenInteractive::Fullscreen();
+    Log("Creating FTXUI screen");
+    ftxui::ScreenInteractive screen = ftxui::ScreenInteractive::FitComponent();
+    {
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD outMode = 0;
+        if (hOut != INVALID_HANDLE_VALUE && GetConsoleMode(hOut, &outMode)) {
+            try {
+                screen = ftxui::ScreenInteractive::Fullscreen();
+            } catch (...) {
+                screen = ftxui::ScreenInteractive::FitComponent();
+            }
+        } else {
+            screen = ftxui::ScreenInteractive::FitComponent();
+        }
+    }
+    Log("FTXUI screen created");
     
     // Background polling thread
     Log("Starting polling thread");
@@ -2641,7 +2862,11 @@ int main() {
         Log("Polling thread running");
         auto lastCheck = std::chrono::steady_clock::now() - std::chrono::seconds(10);
         std::string currentPhase = "none";
+        int loopCount = 0;
         while (g_running) {
+            try {
+                loopCount++;
+                if (loopCount <= 5) Log("Poll loop " + std::to_string(loopCount));
             auto now = std::chrono::steady_clock::now();
             int pollInterval = 4;
             {
@@ -2656,12 +2881,16 @@ int main() {
             
             if (timeToRefresh) {
                 lastCheck = now;
+                if (loopCount <= 5) Log("poll: readLockfile");
                 Lockfile newLock = readLockfile();
                 Session newSession;
                 MatchState newState;
+                if (loopCount <= 5) Log("poll: lockfile port=" + std::to_string(newLock.port));
                 if (newLock.port != 0) {
+                    if (loopCount <= 5) Log("poll: getSession");
                     newSession = getSession(newLock);
                     g_localPuuid = newSession.puuid;
+                    if (loopCount <= 5) Log("poll: getSession done puuid=" + std::to_string(newSession.puuid.size()));
 
                     if (!newSession.accessToken.empty()) {
                         static bool s_ownedChecked = false;
@@ -2674,8 +2903,11 @@ int main() {
                             }).detach();
                         }
 
+                        if (loopCount <= 5) Log("poll: getLiveMatchState");
                         newState = getLiveMatchState(newSession, newLock);
+                        if (loopCount <= 5) Log("poll: getLiveMatchState done err=" + std::to_string((int)newState.isError) + " phase=" + newState.phase);
                         if (!newState.isError && newState.phase != "none") {
+                            if (loopCount <= 5) Log("poll: resolveOwnParty");
                             resolveOwnParty(newSession, newState.players);
                             
                             if (!g_discordClientId.empty()) {
@@ -2683,6 +2915,7 @@ int main() {
                                 std::string dDetails = "Map: " + (g_globalMapNameMap.count(newState.mapId) ? g_globalMapNameMap[newState.mapId] : newState.mapId);
                                 updateDiscordPresence(dState, dDetails);
                             }
+                            if (loopCount <= 5) Log("poll: getPresencesPartyMap");
                             auto presencePartyMap = getPresencesPartyMap(newLock);
                             for (auto& p : newState.players) {
                                 if (p.partyId.empty() && presencePartyMap.count(p.puuid)) {
@@ -2690,9 +2923,13 @@ int main() {
                                 }
                             }
                             
+                            if (loopCount <= 5) Log("poll: resolveDisplayNamesAndRanks");
                             resolveDisplayNamesAndRanks(newSession, newState.players);
+                            if (loopCount <= 5) Log("poll: updateMatchLoadouts");
                             updateMatchLoadouts(newSession, newState);
+                            if (loopCount <= 5) Log("poll: detectPartiesFromMatchHistory");
                             detectPartiesFromMatchHistory(newSession, newState);
+                            if (loopCount <= 5) Log("poll: party detection done");
                         } else {
                             g_lastLoadedMatchId = "";
                             g_lastPartyCheckMatchId = "";
@@ -3016,63 +3253,97 @@ int main() {
             
             screen.PostEvent(ftxui::Event::Custom);
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            } catch (const std::exception& e) {
+                Log(std::string("Polling thread error: ") + e.what());
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            } catch (...) {
+                Log("Polling thread error: unknown exception");
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
         }
+        Log("Polling thread exiting");
     });
 
     // FTXUI Component
     auto renderer = ftxui::Renderer([&] {
-        MatchState safeMatchState;
-        Session safeSession;
-        Lockfile safeLock;
-        std::set<std::string> safeOwnedAgents;
-        {
-            std::lock_guard<std::mutex> lk(g_mutex);
-            safeMatchState = matchState;
-            safeSession = session;
-            safeLock = lock;
-            safeOwnedAgents = g_ownedAgents;
-        }
+        try {
+            std::set_terminate(logTerminateHandler);
+            SetUnhandledExceptionFilter(logUnhandledException);
+            MatchState safeMatchState;
+            Session safeSession;
+            Lockfile safeLock;
+            std::set<std::string> safeOwnedAgents;
+            {
+                std::lock_guard<std::mutex> lk(g_mutex);
+                safeMatchState = matchState;
+                safeSession = session;
+                safeLock = lock;
+                safeOwnedAgents = g_ownedAgents;
+            }
 
-        if (g_showPostMatch) {
-            auto now = std::chrono::steady_clock::now();
-            auto elapsedSec = std::chrono::duration_cast<std::chrono::seconds>(now - g_postMatchStartTime).count();
-            if (elapsedSec >= 15) {
-                g_showPostMatch = false;
-            } else {
-                return renderPostMatchOverlay(g_postMatchInfo);
-            }
-        }
-        if (g_currentView == AppView::PLAYER_STATS) {
-            if (g_playerProfileTab == PlayerProfileTab::SKINS) {
-                PlayerWeaponLoadout pLoadout;
-                {
-                    std::lock_guard<std::mutex> lk(g_loadoutsMutex);
-                    if (g_playerLoadouts.count(g_selectedPuuid)) {
-                        pLoadout = g_playerLoadouts[g_selectedPuuid];
+            if (g_showPostMatch) {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsedSec = std::chrono::duration_cast<std::chrono::seconds>(now - g_postMatchStartTime).count();
+                if (elapsedSec >= 15) {
+                    g_showPostMatch = false;
+                } else {
+                    try {
+                        return renderPostMatchOverlay(g_postMatchInfo);
+                    } catch (...) {
+                        g_showPostMatch = false;
                     }
                 }
-                if (pLoadout.weapons.empty()) {
-                    for (const auto& dw : DEFAULT_WEAPONS) {
-                        WeaponSkinInfo wsi;
-                        wsi.weaponUuid = dw.uuid;
-                        wsi.weaponName = dw.name;
-                        wsi.category = dw.category;
-                        wsi.categoryOrder = dw.catOrder;
-                        wsi.weaponOrder = dw.weaponOrder;
-                        wsi.skinName = "Стандартный " + dw.name;
-                        wsi.fullName = wsi.skinName;
-                        wsi.isCustom = false;
-                        pLoadout.weapons[dw.uuid] = wsi;
-                    }
-                }
-                return renderPlayerSkins(pLoadout);
             }
-            return renderPlayerStats(agentMap, mapNameMap);
+            if (g_currentView == AppView::PLAYER_STATS) {
+                try {
+                    if (g_playerProfileTab == PlayerProfileTab::SKINS) {
+                        PlayerWeaponLoadout pLoadout;
+                        {
+                            std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+                            if (g_playerLoadouts.count(g_selectedPuuid)) {
+                                pLoadout = g_playerLoadouts[g_selectedPuuid];
+                            }
+                        }
+                        if (pLoadout.weapons.empty()) {
+                            for (const auto& dw : DEFAULT_WEAPONS) {
+                                WeaponSkinInfo wsi;
+                                wsi.weaponUuid = dw.uuid;
+                                wsi.weaponName = dw.name;
+                                wsi.category = dw.category;
+                                wsi.categoryOrder = dw.catOrder;
+                                wsi.weaponOrder = dw.weaponOrder;
+                                wsi.skinName = "Стандартный " + dw.name;
+                                wsi.fullName = wsi.skinName;
+                                wsi.isCustom = false;
+                                pLoadout.weapons[dw.uuid] = wsi;
+                            }
+                        }
+                        return renderPlayerSkins(pLoadout);
+                    }
+                    return renderPlayerStats(agentMap, mapNameMap);
+                } catch (...) {
+                    g_currentView = AppView::MAIN;
+                }
+            }
+            if (g_currentView == AppView::AGENT_PICK) {
+                try {
+                    return renderAgentPicker(safeMatchState, mapNameMap, safeOwnedAgents);
+                } catch (...) {
+                    g_currentView = AppView::MAIN;
+                }
+            }
+            try {
+                return renderFTXUI(safeMatchState, safeSession, safeLock, agentMap, mapNameMap);
+            } catch (...) {
+                return ftxui::vbox({ftxui::filler(), ftxui::hbox({ftxui::filler(), ftxui::text("Ошибка отрисовки UI. Нажмите Q для выхода.") | ftxui::color(ftxui::Color::Red), ftxui::filler()}), ftxui::filler()});
+            }
+        } catch (const std::exception& e) {
+            Log(std::string("Render fatal: ") + e.what());
+            return ftxui::vbox({ftxui::filler(), ftxui::hbox({ftxui::filler(), ftxui::text("Критическая ошибка UI"), ftxui::filler()}), ftxui::filler()});
+        } catch (...) {
+            Log("Render fatal: unknown");
+            return ftxui::vbox({ftxui::filler(), ftxui::hbox({ftxui::filler(), ftxui::text("Критическая ошибка UI"), ftxui::filler()}), ftxui::filler()});
         }
-        if (g_currentView == AppView::AGENT_PICK) {
-            return renderAgentPicker(safeMatchState, mapNameMap, safeOwnedAgents);
-        }
-        return renderFTXUI(safeMatchState, safeSession, safeLock, agentMap, mapNameMap);
     });
 
     // Catch events for clicks and quitting
