@@ -169,3 +169,223 @@ inline std::string translateGamingChat(const std::string& text) {
     if (anyReplaced) return result;
     return "";
 }
+
+
+inline std::string toLowerUtf8(const std::string& s) {
+    std::string res;
+    for (size_t i = 0; i < s.size(); ++i) {
+        unsigned char c = (unsigned char)s[i];
+        if (c >= 'A' && c <= 'Z') {
+            res.push_back((char)(c + ('a' - 'A')));
+        } else if (c == 0xD0 && i + 1 < s.size()) {
+            unsigned char c2 = (unsigned char)s[i + 1];
+            if (c2 >= 0x90 && c2 <= 0x9F) {
+                res.push_back((char)0xD0);
+                res.push_back((char)(c2 + 0x20));
+                i++;
+            } else if (c2 >= 0xA0 && c2 <= 0xAF) {
+                res.push_back((char)0xD1);
+                res.push_back((char)(c2 - 0x20));
+                i++;
+            } else if (c2 == 0x81) {
+                res.push_back((char)0xD1);
+                res.push_back((char)0x91);
+                i++;
+            } else {
+                res.push_back((char)c);
+            }
+        } else if (c == 0xD1 && i + 1 < s.size()) {
+            res.push_back((char)c);
+            res.push_back(s[i + 1]);
+            i++;
+        } else {
+            res.push_back((char)c);
+        }
+    }
+    return res;
+}
+
+struct FilterResult {
+    std::string text;
+    bool wasCensored = false;
+    bool isHardBanned = false;
+    std::string reason = "";
+};
+
+inline FilterResult filterProfanityAndSlurs(const std::string& input) {
+    FilterResult res;
+    res.text = input;
+
+    // Hard banned words (Riot automated permanent ban triggers)
+    static const std::vector<std::string> HARD_BANS = {
+        "nigger", "nigga", "faggot", "fag", "chink", "retard", "kys", "kill yourself", "убейся", "негр", "чурка", "хач", "пидорас"
+    };
+
+    std::string lower = toLowerUtf8(input);
+
+    for (const auto& bad : HARD_BANS) {
+        if (lower.find(bad) != std::string::npos) {
+            res.isHardBanned = true;
+            res.reason = "Содержит запрещенные слова (высокий риск бана Riot Games!)";
+            return res;
+        }
+    }
+
+    // Swear words to censor with ***
+    static const std::vector<std::string> SWEAR_WORDS = {
+        "хуй", "хуя", "хуе", "хуи", "хую", "хер", "пизд", "ебат", "ебан", "ебу", "ёб", "еб", "бля", "блят", "сука", "суч", "гандон", "гондон", "мудак", "мудил", "чмо", "даун", "шлюх", "уеб", "залуп", "дроч", "тварь",
+        "fuck", "fucking", "fucked", "fucker", "shit", "bitch", "cunt", "asshole", "bastard", "dick", "pussy", "idiot"
+    };
+
+    for (const auto& w : SWEAR_WORDS) {
+        size_t pos = 0;
+        while ((pos = lower.find(w, pos)) != std::string::npos) {
+            size_t wLen = w.length();
+            std::string stars(3, '*');
+            res.text.replace(pos, wLen, stars);
+            lower.replace(pos, wLen, stars);
+            res.wasCensored = true;
+            pos += 3;
+        }
+    }
+
+    return res;
+}
+
+inline std::string translateRussianToEnglish(const std::string& text) {
+    if (text.empty()) return text;
+    std::string lower = toLowerUtf8(text);
+
+    static const std::vector<std::pair<std::string, std::string>> RU_TO_EN_PHRASES = {
+        {"го а", "rush A"},
+        {"го на а", "rush A"},
+        {"рашим а", "rush A"},
+        {"пойдем на а", "go A"},
+        {"го б", "rush B"},
+        {"го на б", "rush B"},
+        {"рашим б", "rush B"},
+        {"пойдем на б", "go B"},
+        {"го с", "rush C"},
+        {"го на с", "rush C"},
+        {"рашим с", "rush C"},
+        {"пойдем на с", "go C"},
+        {"го мид", "go mid"},
+        {"рашим мид", "rush mid"},
+        {"все а", "all A"},
+        {"все на а", "all A"},
+        {"все б", "all B"},
+        {"все на б", "all B"},
+        {"все с", "all C"},
+        {"все на с", "all C"},
+        {"все мид", "all mid"},
+        {"все на миду", "all mid"},
+        {"дропни вандал", "drop vandal please"},
+        {"скинь вандал", "drop vandal pls"},
+        {"дай вандал", "give vandal please"},
+        {"дропни фантом", "drop phantom please"},
+        {"скинь фантом", "drop phantom pls"},
+        {"дай фантом", "give phantom please"},
+        {"дропни оп", "drop op please"},
+        {"дропни оружие", "drop weapon please"},
+        {"дай оружие", "drop weapon please"},
+        {"дай дроп", "drop please"},
+        {"скинь дроп", "drop please"},
+        {"купи мне", "buy for me please"},
+        {"купи", "buy please"},
+        {"не пикай", "don't peek, play safe"},
+        {"не пикайте", "don't peek, play time"},
+        {"не пушь", "don't push, stay safe"},
+        {"не пушьте", "don't push"},
+        {"сейви", "save weapon"},
+        {"сейв", "save"},
+        {"сохраняй", "save your gun"},
+        {"пленти", "plant the spike"},
+        {"ставьте", "plant the spike"},
+        {"ставь спайк", "plant spike"},
+        {"дифьюзь", "defuse the spike"},
+        {"дефь", "defuse"},
+        {"он ванхп", "he is 1hp"},
+        {"он лоу", "he is low hp"},
+        {"он ваншот", "he is one shot"},
+        {"дай инфу", "give info please"},
+        {"где они", "where are they?"},
+        {"хорош", "nice shot / gj!"},
+        {"красава", "gj nice shot!"},
+        {"красавчик", "well played!"},
+        {"гж", "gj"},
+        {"спасибо", "thanks"},
+        {"спс", "thx"},
+        {"сори", "sorry my bad"},
+        {"извини", "sorry my bad"},
+        {"не переживай", "no worries, all good"},
+        {"все норм", "all good"},
+        {"удачи", "gl hf"},
+        {"эко", "eco round"},
+        {"копим", "save credits / eco"},
+        {"форс", "force buy"},
+        {"форсим", "force buy"},
+        {"полный закуп", "full buy"},
+        {"дай смок", "smoke please"},
+        {"смокни", "smoke please"},
+        {"дай флешку", "flash please"},
+        {"ослепи", "flash please"},
+        {"полечи", "heal me please"},
+        {"дай хил", "heal me pls"},
+        {"воскреси", "res please"},
+        {"дай рез", "res me pls"},
+        {"ульта готова", "ult ready"},
+        {"в спину", "flank behind!"},
+        {"спина", "behind us!"},
+        {"обходят", "they are flanking!"},
+        {"они на а", "they are on A"},
+        {"они на б", "they are on B"},
+        {"они на с", "they are on C"},
+        {"они на миду", "they are on mid"},
+        {"он на хэвене", "he is in heaven"},
+        {"он на спавне", "he is in spawn / CT"},
+        {"он кт", "he is CT"},
+        {"фейк", "fake site"},
+        {"тихо", "play quiet, walk"}
+    };
+
+    for (const auto& [ru, en] : RU_TO_EN_PHRASES) {
+        if (lower == ru) return en;
+    }
+
+    // Word replacements for partial translation
+    static const std::vector<std::pair<std::string, std::string>> WORD_DICT = {
+        {"вандал", "vandal"},
+        {"фантом", "phantom"},
+        {"оператор", "operator"},
+        {"спайк", "spike"},
+        {"дифьюз", "defuse"},
+        {"хэвен", "heaven"},
+        {"хелл", "hell"},
+        {"мид", "mid"},
+        {"шорт", "short"},
+        {"лонг", "long"},
+        {"гараж", "garage"},
+        {"баня", "shower"},
+        {"нычка", "cubby"},
+        {"смок", "smoke"},
+        {"флешка", "flash"},
+        {"ульта", "ult"},
+        {"раш", "rush"},
+        {"пуш", "push"},
+        {"пик", "peek"},
+        {"сейв", "save"}
+    };
+
+    std::string result = text;
+    for (const auto& [ruWord, enWord] : WORD_DICT) {
+        size_t p = 0;
+        std::string lRes = toLowerUtf8(result);
+        while ((p = lRes.find(ruWord, p)) != std::string::npos) {
+            result.replace(p, ruWord.length(), enWord);
+            lRes = toLowerUtf8(result);
+            p += enWord.length();
+        }
+    }
+
+    return result;
+}

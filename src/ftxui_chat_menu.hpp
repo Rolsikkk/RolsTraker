@@ -7,6 +7,7 @@
 #include <string>
 #include <map>
 #include <mutex>
+#include <chrono>
 #include <algorithm>
 
 #include "chat_translator.hpp"
@@ -18,6 +19,15 @@ extern std::mutex g_chatMutex;
 extern ftxui::Box g_chatOpenBox;
 extern ftxui::Box g_chatCloseBox;
 extern ftxui::Box g_chatClearBox;
+extern ftxui::Box g_chatChannelBox;
+extern ftxui::Box g_chatTranslateToggleBox;
+extern ftxui::Box g_chatSendBox;
+
+extern std::string g_chatTargetChannel;
+extern bool g_chatAutoTranslateRuToEn;
+extern std::string g_chatInputText;
+extern std::string g_chatStatusMessage;
+extern std::chrono::steady_clock::time_point g_chatStatusTime;
 extern bool g_mousePressed;
 
 inline ftxui::Element renderChatMenu() {
@@ -41,7 +51,6 @@ inline ftxui::Element renderChatMenu() {
             })
         );
     } else {
-        // Show up to the last 25 messages
         int startIdx = std::max(0, (int)msgs.size() - 25);
         for (size_t i = startIdx; i < msgs.size(); ++i) {
             const auto& m = msgs[i];
@@ -59,7 +68,7 @@ inline ftxui::Element renderChatMenu() {
                 channelColor = Color::MagentaLight;
             }
 
-            Color nameColor = m.isEnemy ? Color::RedLight : Color::GreenLight;
+            Color nameColor = m.isEnemy ? Color::RedLight : (m.senderName == "ВЫ" ? Color::YellowLight : Color::GreenLight);
             std::string enemyBadge = m.isEnemy ? " (Враг)" : "";
             std::string agentStr = m.senderAgent.empty() ? "" : ("[" + m.senderAgent + "] ");
 
@@ -83,32 +92,79 @@ inline ftxui::Element renderChatMenu() {
 
     auto listPane = vbox(std::move(msgElements)) | yframe | flex;
 
-    auto backBtn = renderButton("НАЗАД (ESC / C)", g_chatCloseBox, Color::CyanLight, "chat_close", g_mousePressed)
+    auto backBtn = renderButton("НАЗАД (ESC)", g_chatCloseBox, Color::CyanLight, "chat_close", g_mousePressed)
                  | reflect(g_chatCloseBox);
     auto clearBtn = renderButton("ОЧИСТИТЬ ЧАТ", g_chatClearBox, Color::GrayLight, "chat_clear", g_mousePressed)
                   | reflect(g_chatClearBox);
 
     auto header = hbox({
-        text("  ПЕРЕХВАТ ЧАТА МАТЧА + АВТОПЕРЕВОД НА РУССКИЙ ") | bold | color(Color::Cyan),
+        text("  ПЕРЕХВАТ И ОТПРАВКА В ЧАТ МАТЧА ") | bold | color(Color::Cyan),
         filler() | flex,
-        text("Автоперевод англ. фраз: ВКЛ ") | bold | color(Color::GreenLight),
-        text(" "),
         clearBtn,
         text(" "),
         backBtn,
         text(" ")
     }) | bgcolor(Color::RGB(18, 25, 40));
 
-    auto hint = hbox({
-        text("  Подсказка: отображает сообщения союзников и общий чат с противниками. Английский сленг переводится сразу на русский.")
-            | color(Color::GrayLight)
+    // Channel toggle button
+    std::string chanLabel = (g_chatTargetChannel == "all") ? "[ Канал: ВСЕМ / ALL (Tab) ]" : "[ Канал: КОМАНДЕ / TEAM (Tab) ]";
+    Color chanColor = (g_chatTargetChannel == "all") ? Color::YellowLight : Color::CyanLight;
+    auto chanBtn = renderButton(chanLabel, g_chatChannelBox, chanColor, "chat_channel", g_mousePressed)
+                 | reflect(g_chatChannelBox);
+
+    // RU -> EN translation toggle button
+    std::string trLabel = g_chatAutoTranslateRuToEn ? "[ RU->EN перевод: ВКЛ ]" : "[ RU->EN перевод: ВЫКЛ ]";
+    Color trColor = g_chatAutoTranslateRuToEn ? Color::GreenLight : Color::GrayLight;
+    auto trBtn = renderButton(trLabel, g_chatTranslateToggleBox, trColor, "chat_translate", g_mousePressed)
+               | reflect(g_chatTranslateToggleBox);
+
+    // Anti-ban filter badge
+    auto antiBanBadge = text(" [Анти-бан фильтр: АКТИВЕН] ") | bold | color(Color::GreenLight) | bgcolor(Color::RGB(10, 40, 20));
+
+    auto controlsRow = hbox({
+        chanBtn,
+        text("  "),
+        trBtn,
+        text("  "),
+        antiBanBadge,
+        filler() | flex
     });
+
+    // Input line
+    std::string displayInput = g_chatInputText.empty() ? "Введите текст сообщения..." : g_chatInputText;
+    Color inputColor = g_chatInputText.empty() ? Color::GrayDark : Color::White;
+
+    auto sendBtn = renderButton("ОТПРАВИТЬ (Enter)", g_chatSendBox, Color::GreenLight, "chat_send", g_mousePressed)
+                 | reflect(g_chatSendBox);
+
+    auto inputRow = hbox({
+        text(" > ") | bold | color(Color::YellowLight),
+        text(displayInput) | color(inputColor),
+        text("_") | bold | color(Color::CyanLight),
+        filler() | flex,
+        sendBtn
+    }) | bgcolor(Color::RGB(15, 20, 30)) | borderStyled(LIGHT, Color::GrayLight);
+
+    // Status or hint
+    Element statusRow;
+    auto now = std::chrono::steady_clock::now();
+    int statusAge = std::chrono::duration_cast<std::chrono::seconds>(now - g_chatStatusTime).count();
+    if (!g_chatStatusMessage.empty() && statusAge < 6) {
+        Color sCol = (g_chatStatusMessage.find("Ошибка") != std::string::npos || g_chatStatusMessage.find("Заблокировано") != std::string::npos)
+                   ? Color::RedLight : Color::GreenLight;
+        statusRow = text(" " + g_chatStatusMessage + " ") | bold | color(sCol);
+    } else {
+        statusRow = text(" Подсказка: Введите текст и нажмите Enter. Tab переключает канал [Команда / Все]. Маты цензурятся автоматически!")
+                  | color(Color::GrayLight);
+    }
 
     return vbox({
         header,
         separator(),
         listPane,
         separator(),
-        hint
+        controlsRow,
+        inputRow,
+        statusRow
     }) | border | flex;
 }
