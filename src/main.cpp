@@ -2982,6 +2982,72 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
     } catch (...) {}
 }
 
+static HWND getTopLevelConsoleWindow() {
+    HWND console = GetConsoleWindow();
+    if (!console) return NULL;
+
+    // 1. Classic conhost check
+    char className[256] = {0};
+    GetClassNameA(console, className, sizeof(className));
+    if (std::string(className) == "ConsoleWindowClass") {
+        HWND root = GetAncestor(console, GA_ROOT);
+        if (root && IsWindowVisible(root)) return root;
+        return console;
+    }
+
+    // 2. Windows Terminal (OpenConsole.exe -> WindowsTerminal.exe)
+    DWORD currentPid = GetCurrentProcessId();
+    for (int depth = 0; depth < 5; ++depth) {
+        HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (hSnapshot == INVALID_HANDLE_VALUE) break;
+
+        PROCESSENTRY32 pe = { sizeof(pe) };
+        DWORD parentPid = 0;
+        if (Process32First(hSnapshot, &pe)) {
+            do {
+                if (pe.th32ProcessID == currentPid) {
+                    parentPid = pe.th32ParentProcessID;
+                    break;
+                }
+            } while (Process32Next(hSnapshot, &pe));
+        }
+        CloseHandle(hSnapshot);
+
+        if (parentPid == 0 || parentPid == currentPid) break;
+
+        struct FindData {
+            DWORD targetPid;
+            HWND foundHwnd = NULL;
+        } fd;
+        fd.targetPid = parentPid;
+
+        EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
+            auto* p = reinterpret_cast<FindData*>(lParam);
+            if (!IsWindowVisible(hwnd)) return TRUE;
+            DWORD pid = 0;
+            GetWindowThreadProcessId(hwnd, &pid);
+            if (pid == p->targetPid) {
+                RECT rc;
+                if (GetWindowRect(hwnd, &rc) && (rc.right - rc.left > 200) && (rc.bottom - rc.top > 200)) {
+                    p->foundHwnd = hwnd;
+                    return FALSE;
+                }
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&fd));
+
+        if (fd.foundHwnd) {
+            return fd.foundHwnd;
+        }
+
+        currentPid = parentPid;
+    }
+
+    HWND root = GetAncestor(console, GA_ROOT);
+    if (root && IsWindowVisible(root)) return root;
+    return console;
+}
+
 int main() {
     Log("Starting main()");
     SetUnhandledExceptionFilter(logUnhandledException);
@@ -2991,7 +3057,7 @@ int main() {
     if (!g_discordClientId.empty()) { initDiscordRpc(g_discordClientId); Log("Discord RPC init done"); }
     
     // Set optimal vertical / portrait window size (1080x1920 screen or primary monitor)
-    HWND console = GetConsoleWindow();
+    HWND console = getTopLevelConsoleWindow();
     bool foundPortrait = false;
     RECT portraitRect = { 0, 0, 0, 0 };
 
@@ -3072,6 +3138,7 @@ int main() {
             }
         }
         MoveWindow(console, startX, startY, targetW, targetH, TRUE);
+        SetWindowPos(console, HWND_TOP, startX, startY, targetW, targetH, SWP_SHOWWINDOW);
     }
     Log("Console window set");
 
