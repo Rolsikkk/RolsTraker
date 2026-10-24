@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.0.3";
+const std::string CURRENT_VERSION = "v3.0.4";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -3066,22 +3066,25 @@ static void applyOptimalWindowSize() {
                 return TRUE;
             }, reinterpret_cast<LPARAM>(&emd));
 
-            int startX = 20, startY = 20, targetW = 1040, targetH = 1800;
+            int targetW = 880;
+            int targetH = 680;
+            int startX = 20, startY = 20;
+
             if (emd.foundPortrait) {
                 int workW = emd.targetRect.right - emd.targetRect.left;
                 int workH = emd.targetRect.bottom - emd.targetRect.top;
-                targetW = workW - 10;
-                targetH = workH - 10;
+                targetW = std::min(880, workW - 20);
+                targetH = std::min(680, workH - 40);
                 startX = emd.targetRect.left + (workW - targetW) / 2;
-                startY = emd.targetRect.top + (workH - targetH) / 2;
+                startY = emd.targetRect.top + 30;
             } else {
                 HMONITOR hMon = MonitorFromWindow(console, MONITOR_DEFAULTTONEAREST);
                 MONITORINFO mi = { sizeof(mi) };
                 if (GetMonitorInfoA(hMon, &mi)) {
                     int workW = mi.rcWork.right - mi.rcWork.left;
                     int workH = mi.rcWork.bottom - mi.rcWork.top;
-                    targetW = std::min(1320, workW - 20);
-                    targetH = std::min(980, workH - 40);
+                    targetW = std::min(880, workW - 20);
+                    targetH = std::min(680, workH - 40);
                     startX = mi.rcWork.left + (workW - targetW) / 2;
                     startY = mi.rcWork.top + (workH - targetH) / 2;
                 }
@@ -3135,8 +3138,8 @@ int main() {
 
     // Set console buffer cols and lines
     Log("Setting console mode");
-    int conCols = foundPortrait ? 110 : 120;
-    int conLines = foundPortrait ? 55 : 40;
+    int conCols = 92;
+    int conLines = 32;
     std::string modeCmd = "mode con cols=" + std::to_string(conCols) + " lines=" + std::to_string(conLines);
     system(modeCmd.c_str());
     
