@@ -46,6 +46,8 @@ extern std::map<std::string, ftxui::Box> g_agentBoxes;
 extern std::string g_pickStatusMsg;
 extern bool g_isLockingAgent;
 extern std::set<std::string> g_ownedAgents;
+extern ftxui::Box g_reportOpenBox;
+extern ftxui::Box g_chatOpenBox;
 
 struct PostMatchInfo {
     std::string matchId = "";
@@ -375,6 +377,12 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         auto myStatsBtn = renderButton("Моя статистика (Tracker.gg)", g_myStatsBox, ftxui::Color::CyanLight, "my_stats", g_mousePressed)
                         | ftxui::reflect(g_myStatsBox);
 
+        auto reportBtn = renderButton("⚠ РЕПОРТ ВРАГОВ (R)", g_reportOpenBox, ftxui::Color::RedLight, "report_open", g_mousePressed)
+                       | ftxui::reflect(g_reportOpenBox);
+
+        auto chatBtn = renderButton("ЧАТ МАТЧА (C)", g_chatOpenBox, ftxui::Color::GreenLight, "chat_open", g_mousePressed)
+                     | ftxui::reflect(g_chatOpenBox);
+
         return ftxui::vbox({
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
@@ -382,7 +390,13 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             updateElem,
             ftxui::text(" Ожидание начала матча... ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
             text(""),
-            myStatsBtn | ftxui::center,
+            ftxui::hbox({
+                myStatsBtn,
+                ftxui::text("  "),
+                reportBtn,
+                ftxui::text("  "),
+                chatBtn
+            }) | ftxui::center,
             ftxui::filler(),
         });
     }
@@ -533,6 +547,10 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         ) : ftxui::text("")),
         ftxui::filler() | ftxui::flex,
         renderButton("Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
+        ftxui::text("  "),
+        renderButton("ЧАТ МАТЧА (C)", g_chatOpenBox, ftxui::Color::GreenLight, "chat_open", g_mousePressed) | ftxui::reflect(g_chatOpenBox),
+        ftxui::text("  "),
+        renderButton("⚠ РЕПОРТ ВРАГОВ (R)", g_reportOpenBox, ftxui::Color::RedLight, "report_open", g_mousePressed) | ftxui::reflect(g_reportOpenBox),
         ftxui::filler() | ftxui::flex,
         (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) : ftxui::text(""))
     }));

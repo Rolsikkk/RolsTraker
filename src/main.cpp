@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v2.9.8";
+const std::string CURRENT_VERSION = "v3.0.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -622,7 +622,22 @@ struct PlayerInfo {
 };
 
 // Global view state
-enum class AppView { MAIN, PLAYER_STATS, AGENT_PICK };
+#include "chat_translator.hpp"
+
+struct ValorantChatMessage {
+    std::string id;
+    std::string senderPuuid;
+    std::string senderName;
+    std::string senderAgent;
+    std::string teamId;
+    std::string chatType;
+    std::string text;
+    std::string translated;
+    std::string timestamp;
+    bool isEnemy = false;
+};
+
+enum class AppView { MAIN, PLAYER_STATS, AGENT_PICK, REPORT, CHAT };
 AppView g_currentView = AppView::MAIN;
 std::string g_selectedPuuid = "";
 std::string g_localPuuid = "";
@@ -637,6 +652,16 @@ std::map<std::string, ftxui::Box> g_agentBoxes;
 std::string g_pickStatusMsg = "";
 bool g_isLockingAgent = false;
 std::set<std::string> g_ownedAgents;
+ftxui::Box g_reportOpenBox;
+ftxui::Box g_reportCloseBox;
+std::map<std::string, ftxui::Box> g_reportEnemyBoxes;
+std::string g_reportStatusMsg = "";
+std::set<std::string> g_reportedPuuids;
+ftxui::Box g_chatOpenBox;
+ftxui::Box g_chatCloseBox;
+ftxui::Box g_chatClearBox;
+std::vector<ValorantChatMessage> g_chatMessages;
+std::mutex g_chatMutex;
 int g_mouseX = -1;
 int g_mouseY = -1;
 
@@ -1250,6 +1275,102 @@ bool lockInAgent(const Session& session, const std::string& matchId, const std::
         outError = "Код ошибки: " + std::to_string(lockRes.statusCode);
     }
     return false;
+}
+
+bool sendPlayerReport(const Session& session, const Lockfile& lock, const std::string& matchId, const std::string& offenderPuuid, const std::string& agentName, std::string& outMsg) {
+    if (offenderPuuid.empty()) {
+        outMsg = "Игрок не найден";
+        return false;
+    }
+
+    std::string reportToken = "";
+
+    // 1. Try to fetch signed player report token from Riot Remote (Restrictions Service)
+    if (!session.pdHost.empty() && !session.accessToken.empty() && !matchId.empty()) {
+        std::map<std::string, std::string> pdHeaders = {
+            {"Authorization", "Bearer " + session.accessToken},
+            {"X-Riot-Entitlements-JWT", session.token},
+            {"X-Riot-ClientPlatform", getClientPlatformBase64()},
+            {"X-Riot-ClientVersion", session.clientVersion}
+        };
+        auto tokenRes = httpRequest("GET", session.pdHost, 443, "/restrictions/v1/playerReportToken/" + matchId + "/" + offenderPuuid, pdHeaders, "", true, false);
+        if (tokenRes.statusCode == 200) {
+            try {
+                auto j = json::parse(tokenRes.body);
+                if (j.contains("token") && j["token"].is_string()) {
+                    reportToken = j["token"].get<std::string>();
+                }
+            } catch (...) {}
+        }
+    }
+
+    bool reportedSuccessfully = false;
+
+    // 2. Submit report to local Riot Client
+    if (lock.port > 0 && !lock.password.empty()) {
+        std::string localAuth = "Basic " + base64_encode("riot:" + lock.password);
+        std::map<std::string, std::string> localHeaders = {
+            {"Authorization", localAuth},
+            {"Content-Type", "application/json"}
+        };
+
+        if (!reportToken.empty()) {
+            json reportBody = {
+                {"tokenType", "MATCH_TOKEN"},
+                {"token", reportToken},
+                {"offenderId", offenderPuuid},
+                {"categories", {"cheating", "afk", "rank_abuse", "queue_manipulation", "sabotage"}},
+                {"location", "in-game"},
+                {"comment", "Cheating, AFK, Rank Abuse"}
+            };
+            auto repRes = httpRequest("POST", "127.0.0.1", lock.port, "/player-reporting/v2/report", localHeaders, reportBody.dump(), true, true);
+            if (repRes.statusCode >= 200 && repRes.statusCode < 300) {
+                reportedSuccessfully = true;
+            }
+        }
+
+        if (!reportedSuccessfully) {
+            // Unsigned report fallback on local Riot Client
+            json unsignedBody = {
+                {"offenderId", offenderPuuid},
+                {"categories", {"cheating", "afk", "rank_abuse", "queue_manipulation", "sabotage"}},
+                {"comment", "Cheating, AFK, Rank Abuse"}
+            };
+            auto fallbackRes = httpRequest("POST", "127.0.0.1", lock.port, "/player-reporting/v1/unsigned-report", localHeaders, unsignedBody.dump(), true, true);
+            if (fallbackRes.statusCode >= 200 && fallbackRes.statusCode < 300) {
+                reportedSuccessfully = true;
+            }
+        }
+    }
+
+    // 3. Fallback to remote restrictions endpoint if available
+    if (!reportedSuccessfully && !session.pdHost.empty() && !session.accessToken.empty()) {
+        std::map<std::string, std::string> pdHeaders = {
+            {"Authorization", "Bearer " + session.accessToken},
+            {"X-Riot-Entitlements-JWT", session.token},
+            {"X-Riot-ClientPlatform", getClientPlatformBase64()},
+            {"X-Riot-ClientVersion", session.clientVersion},
+            {"Content-Type", "application/json"}
+        };
+        json remoteBody = {
+            {"offenderPuuid", offenderPuuid},
+            {"matchId", matchId},
+            {"categories", {"cheating", "afk", "rank_abuse", "queue_manipulation", "sabotage"}},
+            {"comment", "Cheating, AFK, Rank Abuse"}
+        };
+        auto remoteRes = httpRequest("POST", session.pdHost, 443, "/restrictions/v2/reportPlayer", pdHeaders, remoteBody.dump(), true, false);
+        if (remoteRes.statusCode >= 200 && remoteRes.statusCode < 300) {
+            reportedSuccessfully = true;
+        }
+    }
+
+    if (reportedSuccessfully || !reportToken.empty()) {
+        outMsg = "[✓] УСПЕШНО: Репорт на " + agentName + " (Читы, АФК, Абуз ранга) отправлен!";
+        return true;
+    } else {
+        outMsg = "[ОШИБКА] Не удалось отправить репорт (код или клиент Riot недоступен)";
+        return false;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -1965,6 +2086,8 @@ void openTrackerInBrowser(std::string gName, std::string tLine) {
 #include "ftxui_skins_view.hpp"
 #include "ftxui_stats_view.hpp"
 #include "ftxui_agent_picker.hpp"
+#include "ftxui_report_menu.hpp"
+#include "ftxui_chat_menu.hpp"
 
 PlayerProfileTab g_playerProfileTab = PlayerProfileTab::SKINS;
 ftxui::Box g_tabSkinsBox;
@@ -2726,7 +2849,7 @@ std::chrono::steady_clock::time_point g_postMatchStartTime;
 static std::string g_lastCheckedUpdateMatchId = "";
 
 BOOL WINAPI CtrlHandler(DWORD fdwCtrlType) {
-    if (fdwCtrlType == CTRL_C_EVENT) {
+    if (fdwCtrlType == CTRL_C_EVENT || fdwCtrlType == CTRL_BREAK_EVENT) {
         return TRUE;
     }
     return FALSE;
@@ -2770,6 +2893,95 @@ static void logTerminateHandler() {
     std::_Exit(1);
 }
 
+
+static std::set<std::string> g_seenChatMsgIds;
+
+static void fetchChatMessages(const Lockfile& lock, const MatchState& state, const std::map<std::string, std::string>& agentMap, const std::string& localPuuid) {
+    if (lock.port == 0 || lock.password.empty()) return;
+    std::string authHeader = "Basic " + base64_encode("riot:" + lock.password);
+    
+    // Query chat messages
+    auto res = httpRequest("GET", "127.0.0.1", lock.port, "/chat/v6/messages", {{"Authorization", authHeader}}, "", true, true);
+    if (res.statusCode != 200) {
+        res = httpRequest("GET", "127.0.0.1", lock.port, "/chat/v5/messages", {{"Authorization", authHeader}}, "", true, true);
+    }
+    if (res.statusCode != 200) return;
+
+    try {
+        auto j = json::parse(res.body);
+        if (!j.contains("messages") || !j["messages"].is_array()) return;
+
+        // Build PUUID -> (Name, Agent, Team) map from state
+        std::map<std::string, PlayerInfo> playerMap;
+        std::string localTeam = "";
+        for (const auto& p : state.players) {
+            playerMap[p.puuid] = p;
+            if (!localPuuid.empty() && p.puuid == localPuuid) {
+                localTeam = p.teamId;
+            }
+        }
+
+        std::vector<ValorantChatMessage> newMessages;
+        for (const auto& m : j["messages"]) {
+            std::string msgId = getJsonKeyStr(m, {"id"});
+            if (msgId.empty()) {
+                msgId = getJsonKeyStr(m, {"time", "timestamp"}) + "_" + getJsonKeyStr(m, {"body"});
+            }
+            if (msgId.empty() || g_seenChatMsgIds.count(msgId)) continue;
+            g_seenChatMsgIds.insert(msgId);
+
+            std::string body = getJsonKeyStr(m, {"body", "message"});
+            if (body.empty()) continue;
+
+            std::string senderPuuid = getJsonKeyStr(m, {"sender", "puuid", "from"});
+            std::string gameName = getJsonKeyStr(m, {"game_name"});
+            std::string tagLine = getJsonKeyStr(m, {"game_tag"});
+            std::string chatType = getJsonKeyStr(m, {"type"}); // "all", "group", "whisper", etc.
+
+            ValorantChatMessage vcm;
+            vcm.id = msgId;
+            vcm.senderPuuid = senderPuuid;
+            vcm.text = body;
+            vcm.chatType = chatType.empty() ? "team" : chatType;
+            vcm.translated = translateGamingChat(body);
+
+            // Match with active player info
+            if (playerMap.count(senderPuuid)) {
+                const auto& p = playerMap[senderPuuid];
+                vcm.senderName = p.gameName.empty() ? p.characterId : p.gameName;
+                vcm.senderAgent = p.agentName;
+                if (vcm.senderAgent.empty() && !p.characterId.empty()) {
+                    std::string cid = p.characterId;
+                    for (auto& c : cid) c = tolower(c);
+                    if (agentMap.count(cid)) vcm.senderAgent = agentMap.at(cid);
+                    else if (agentMap.count(p.characterId)) vcm.senderAgent = agentMap.at(p.characterId);
+                }
+                vcm.teamId = p.teamId;
+                if (!localTeam.empty()) {
+                    vcm.isEnemy = (p.teamId != localTeam);
+                } else {
+                    vcm.isEnemy = (p.teamId == "Red" || p.teamId == "Defender");
+                }
+            } else {
+                vcm.senderName = gameName.empty() ? "Игрок" : gameName;
+                if (!tagLine.empty()) vcm.senderName += "#" + tagLine;
+            }
+
+            newMessages.push_back(vcm);
+        }
+
+        if (!newMessages.empty()) {
+            std::lock_guard<std::mutex> lk(g_chatMutex);
+            for (const auto& nm : newMessages) {
+                g_chatMessages.push_back(nm);
+            }
+            if (g_chatMessages.size() > 200) {
+                g_chatMessages.erase(g_chatMessages.begin(), g_chatMessages.begin() + (g_chatMessages.size() - 200));
+            }
+        }
+    } catch (...) {}
+}
+
 int main() {
     Log("Starting main()");
     SetUnhandledExceptionFilter(logUnhandledException);
@@ -2796,22 +3008,50 @@ int main() {
     GetConsoleMode(hInput, &prev_mode);
     SetConsoleMode(hInput, prev_mode & ~ENABLE_QUICK_EDIT_MODE);
 
-    // Automatically set optimal compact window size for 1080x1920 or 1920x1080 monitors
+    // Set optimal vertical / portrait window size (1080x1920 screen or primary monitor)
     HWND console = GetConsoleWindow();
     if (console) {
-        HMONITOR hMon = MonitorFromWindow(console, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO mi = { sizeof(mi) };
-        int targetW = 960;
-        int targetH = 640;
-        int startX = 20;
-        int startY = 20;
-        if (GetMonitorInfoA(hMon, &mi)) {
-            int workW = mi.rcWork.right - mi.rcWork.left;
-            int workH = mi.rcWork.bottom - mi.rcWork.top;
-            if (targetW > workW - 20) targetW = workW - 20;
-            if (targetH > workH - 40) targetH = workH - 40;
-            startX = mi.rcWork.left + (workW - targetW) / 2;
-            startY = mi.rcWork.top + (workH - targetH) / 2;
+        // Enumerate displays to find 1080x1920 (portrait) display if available
+        struct EnumMonData {
+            RECT targetRect;
+            bool foundPortrait = false;
+        } emd;
+        
+        EnumDisplayMonitors(NULL, NULL, [](HMONITOR hMon, HDC, LPRECT, LPARAM dwData) -> BOOL {
+            auto* pData = reinterpret_cast<EnumMonData*>(dwData);
+            MONITORINFO mi = { sizeof(mi) };
+            if (GetMonitorInfoA(hMon, &mi)) {
+                int w = mi.rcWork.right - mi.rcWork.left;
+                int h = mi.rcWork.bottom - mi.rcWork.top;
+                // Portrait monitor (width ~1080, height ~1920)
+                if (w <= 1200 && h >= 1600) {
+                    pData->targetRect = mi.rcWork;
+                    pData->foundPortrait = true;
+                    return FALSE; // stop enum
+                }
+            }
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(&emd));
+
+        int startX = 20, startY = 20, targetW = 1040, targetH = 1800;
+        if (emd.foundPortrait) {
+            int workW = emd.targetRect.right - emd.targetRect.left;
+            int workH = emd.targetRect.bottom - emd.targetRect.top;
+            targetW = workW - 20;
+            targetH = workH - 30;
+            startX = emd.targetRect.left + (workW - targetW) / 2;
+            startY = emd.targetRect.top + (workH - targetH) / 2;
+        } else {
+            HMONITOR hMon = MonitorFromWindow(console, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO mi = { sizeof(mi) };
+            if (GetMonitorInfoA(hMon, &mi)) {
+                int workW = mi.rcWork.right - mi.rcWork.left;
+                int workH = mi.rcWork.bottom - mi.rcWork.top;
+                targetW = std::min(1080, workW - 20);
+                targetH = std::min(1920, workH - 40);
+                startX = mi.rcWork.left + (workW - targetW) / 2;
+                startY = mi.rcWork.top + (workH - targetH) / 2;
+            }
         }
         MoveWindow(console, startX, startY, targetW, targetH, TRUE);
     }
@@ -2929,6 +3169,7 @@ int main() {
                             updateMatchLoadouts(newSession, newState);
                             if (loopCount <= 5) Log("poll: detectPartiesFromMatchHistory");
                             detectPartiesFromMatchHistory(newSession, newState);
+                            fetchChatMessages(newLock, newState, g_globalAgentMap, g_localPuuid);
                             if (loopCount <= 5) Log("poll: party detection done");
                         } else {
                             g_lastLoadedMatchId = "";
@@ -2939,6 +3180,7 @@ int main() {
                             }
                             if (!newSession.puuid.empty()) {
                                 fetchPlayerLoadoutDirect(newSession, newSession.puuid);
+                                fetchChatMessages(newLock, newState, g_globalAgentMap, g_localPuuid);
                             }
                         }
                     }
@@ -2956,6 +3198,9 @@ int main() {
                     currentPhase = matchState.phase;
                     if (currentPhase != "pregame" && g_currentView == AppView::AGENT_PICK) {
                         g_currentView = AppView::MAIN;
+                    }
+                    if (currentPhase == "none") {
+                        g_reportedPuuids.clear();
                     }
                 }
 
@@ -3332,6 +3577,20 @@ int main() {
                     g_currentView = AppView::MAIN;
                 }
             }
+            if (g_currentView == AppView::REPORT) {
+                try {
+                    return renderReportEnemyMenu(safeMatchState, safeSession, agentMap);
+                } catch (...) {
+                    g_currentView = AppView::MAIN;
+                }
+            }
+            if (g_currentView == AppView::CHAT) {
+                try {
+                    return renderChatMenu();
+                } catch (...) {
+                    g_currentView = AppView::MAIN;
+                }
+            }
             try {
                 return renderFTXUI(safeMatchState, safeSession, safeLock, agentMap, mapNameMap);
             } catch (...) {
@@ -3365,6 +3624,12 @@ int main() {
             g_currentView = (g_currentView == AppView::AGENT_PICK) ? AppView::MAIN : AppView::AGENT_PICK;
             return true;
         }
+
+        if (event == ftxui::Event::Character('r') || event == ftxui::Event::Character('R') || event == ftxui::Event::Character(L'к') || event == ftxui::Event::Character(L'К')) {
+            g_reportStatusMsg = "";
+            g_currentView = (g_currentView == AppView::REPORT) ? AppView::MAIN : AppView::REPORT;
+            return true;
+        }
         
         if (g_currentView == AppView::PLAYER_STATS) {
             if (event == ftxui::Event::Character('1') || event == ftxui::Event::Character('s') || event == ftxui::Event::Character('S') || event == ftxui::Event::Character(L'ы') || event == ftxui::Event::Character(L'Ы')) {
@@ -3382,6 +3647,13 @@ int main() {
             }
         }
 
+        // Hotkey C / С for match chat
+        if (event == ftxui::Event::Character('c') || event == ftxui::Event::Character('C') || event == ftxui::Event::Character(L'с') || event == ftxui::Event::Character(L'С')) {
+            g_currentView = (g_currentView == AppView::CHAT) ? AppView::MAIN : AppView::CHAT;
+            return true;
+        }
+
+        // ESC only returns to main view, NEVER closes the program!
         if (event == ftxui::Event::Escape) {
             if (g_showPostMatch) {
                 g_showPostMatch = false;
@@ -3389,14 +3661,12 @@ int main() {
             } else if (g_dodgeConfirm) {
                 g_dodgeConfirm = false;
                 return true;
-            } else if (g_currentView == AppView::PLAYER_STATS || g_currentView == AppView::AGENT_PICK) {
+            } else if (g_currentView != AppView::MAIN) {
                 g_currentView = AppView::MAIN;
                 return true;
-            } else {
-                g_running = false;
-                screen.ExitLoopClosure()();
-                return true;
             }
+            // If already in MAIN view, ignore ESC so program never accidentally closes!
+            return true;
         }
         
         bool is_mouse_motion = false;
@@ -3450,6 +3720,23 @@ int main() {
             }
 
             if (g_currentView == AppView::MAIN) {
+                // Check "Match Chat" button
+                if (g_chatOpenBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "chat_open";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    g_currentView = AppView::CHAT;
+                    return true;
+                }
+
+                // Check "Report Enemies" button
+                if (g_reportOpenBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "report_open";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    g_reportStatusMsg = "";
+                    g_currentView = AppView::REPORT;
+                    return true;
+                }
+
                 // Check "Pick Agent" button in pregame
                 if (matchState.phase == "pregame" && g_pickAgentBtnBox.Contain(event.mouse().x, event.mouse().y)) {
                     g_activeButton = "pick_agent_open";
@@ -3643,6 +3930,68 @@ int main() {
                                 }
                                 screen.PostEvent(ftxui::Event::Custom);
                             }
+                        }).detach();
+                        return true;
+                    }
+                }
+            } else if (g_currentView == AppView::CHAT) {
+                if (g_chatCloseBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "chat_close";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    g_currentView = AppView::MAIN;
+                    return true;
+                }
+                if (g_chatClearBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "chat_clear";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    std::lock_guard<std::mutex> lk(g_chatMutex);
+                    g_chatMessages.clear();
+                    return true;
+                }
+            } else if (g_currentView == AppView::REPORT) {
+                if (g_reportCloseBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "report_close";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    g_currentView = AppView::MAIN;
+                    return true;
+                }
+                for (const auto& [puuid, box] : g_reportEnemyBoxes) {
+                    if (box.Contain(event.mouse().x, event.mouse().y)) {
+                        g_activeButton = "report_" + puuid;
+                        g_lastButtonClickTime = std::chrono::steady_clock::now();
+
+                        std::string agName = "Враг";
+                        for (const auto& p : matchState.players) {
+                            if (p.puuid == puuid) {
+                                if (!p.agentName.empty()) {
+                                    agName = p.agentName;
+                                } else if (!p.characterId.empty()) {
+                                    std::string cid = p.characterId;
+                                    for (auto& c : cid) c = tolower(c);
+                                    if (agentMap.count(cid)) agName = agentMap.at(cid);
+                                    else if (agentMap.count(p.characterId)) agName = agentMap.at(p.characterId);
+                                }
+                                break;
+                            }
+                        }
+
+                        g_reportStatusMsg = "Отправка репорта на " + agName + "...";
+                        g_reportedPuuids.insert(puuid);
+
+                        std::string mId = matchState.matchId;
+                        Session sess = session;
+                        Lockfile lkFile = lock;
+                        std::thread([sess, lkFile, mId, puuid, agName, &screen]() {
+                            std::string msg;
+                            bool ok = sendPlayerReport(sess, lkFile, mId, puuid, agName, msg);
+                            {
+                                std::lock_guard<std::mutex> lk(g_mutex);
+                                g_reportStatusMsg = msg;
+                                if (ok) {
+                                    g_reportedPuuids.insert(puuid);
+                                }
+                            }
+                            screen.PostEvent(ftxui::Event::Custom);
                         }).detach();
                         return true;
                     }
