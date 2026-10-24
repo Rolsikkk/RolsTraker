@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.0.1";
+const std::string CURRENT_VERSION = "v3.0.2";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -3048,6 +3048,61 @@ static HWND getTopLevelConsoleWindow() {
     return console;
 }
 
+static void applyOptimalWindowSize() {
+    std::thread([]() {
+        for (int attempt = 0; attempt < 5; ++attempt) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(attempt == 0 ? 80 : 250));
+            HWND console = getTopLevelConsoleWindow();
+            if (!console) continue;
+
+            struct EnumMonData {
+                RECT targetRect;
+                bool foundPortrait = false;
+            } emd;
+            
+            EnumDisplayMonitors(NULL, NULL, [](HMONITOR hMon, HDC, LPRECT, LPARAM dwData) -> BOOL {
+                auto* pData = reinterpret_cast<EnumMonData*>(dwData);
+                MONITORINFO mi = { sizeof(mi) };
+                if (GetMonitorInfoA(hMon, &mi)) {
+                    int w = mi.rcWork.right - mi.rcWork.left;
+                    int h = mi.rcWork.bottom - mi.rcWork.top;
+                    // Portrait monitor (width ~1080, height ~1920)
+                    if (w <= 1200 && h >= 1600) {
+                        pData->targetRect = mi.rcWork;
+                        pData->foundPortrait = true;
+                        return FALSE;
+                    }
+                }
+                return TRUE;
+            }, reinterpret_cast<LPARAM>(&emd));
+
+            int startX = 20, startY = 20, targetW = 1040, targetH = 1800;
+            if (emd.foundPortrait) {
+                int workW = emd.targetRect.right - emd.targetRect.left;
+                int workH = emd.targetRect.bottom - emd.targetRect.top;
+                targetW = workW - 10;
+                targetH = workH - 10;
+                startX = emd.targetRect.left + (workW - targetW) / 2;
+                startY = emd.targetRect.top + (workH - targetH) / 2;
+            } else {
+                HMONITOR hMon = MonitorFromWindow(console, MONITOR_DEFAULTTONEAREST);
+                MONITORINFO mi = { sizeof(mi) };
+                if (GetMonitorInfoA(hMon, &mi)) {
+                    int workW = mi.rcWork.right - mi.rcWork.left;
+                    int workH = mi.rcWork.bottom - mi.rcWork.top;
+                    targetW = std::min(1320, workW - 20);
+                    targetH = std::min(980, workH - 40);
+                    startX = mi.rcWork.left + (workW - targetW) / 2;
+                    startY = mi.rcWork.top + (workH - targetH) / 2;
+                }
+            }
+
+            MoveWindow(console, startX, startY, targetW, targetH, TRUE);
+            SetWindowPos(console, HWND_TOP, startX, startY, targetW, targetH, SWP_SHOWWINDOW);
+        }
+    }).detach();
+}
+
 int main() {
     Log("Starting main()");
     SetUnhandledExceptionFilter(logUnhandledException);
@@ -3116,30 +3171,7 @@ int main() {
         SetConsoleWindowInfo(hOut, TRUE, &sRect);
     }
 
-    if (console) {
-        int startX = 20, startY = 20, targetW = 1040, targetH = 1800;
-        if (foundPortrait) {
-            int workW = portraitRect.right - portraitRect.left;
-            int workH = portraitRect.bottom - portraitRect.top;
-            targetW = workW - 20;
-            targetH = workH - 30;
-            startX = portraitRect.left + (workW - targetW) / 2;
-            startY = portraitRect.top + (workH - targetH) / 2;
-        } else {
-            HMONITOR hMon = MonitorFromWindow(console, MONITOR_DEFAULTTONEAREST);
-            MONITORINFO mi = { sizeof(mi) };
-            if (GetMonitorInfoA(hMon, &mi)) {
-                int workW = mi.rcWork.right - mi.rcWork.left;
-                int workH = mi.rcWork.bottom - mi.rcWork.top;
-                targetW = std::min(1080, workW - 20);
-                targetH = std::min(1920, workH - 40);
-                startX = mi.rcWork.left + (workW - targetW) / 2;
-                startY = mi.rcWork.top + (workH - targetH) / 2;
-            }
-        }
-        MoveWindow(console, startX, startY, targetW, targetH, TRUE);
-        SetWindowPos(console, HWND_TOP, startX, startY, targetW, targetH, SWP_SHOWWINDOW);
-    }
+    applyOptimalWindowSize();
     Log("Console window set");
 
     std::thread([]() {
@@ -3702,6 +3734,21 @@ int main() {
         
         if (event == ftxui::Event::Special("\x03") || (event.is_character() && event.character() == "\x03")) { // Ctrl+C
             return true; 
+        }
+
+        if (event == ftxui::Event::F11 || event == ftxui::Event::Character('m') || event == ftxui::Event::Character('M') || event == ftxui::Event::Character(L'ь') || event == ftxui::Event::Character(L'Ь')) {
+            HWND hWin = getTopLevelConsoleWindow();
+            if (hWin) {
+                WINDOWPLACEMENT wp = { sizeof(wp) };
+                if (GetWindowPlacement(hWin, &wp)) {
+                    if (wp.showCmd == SW_SHOWMAXIMIZED) {
+                        ShowWindow(hWin, SW_RESTORE);
+                    } else {
+                        ShowWindow(hWin, SW_MAXIMIZE);
+                    }
+                }
+            }
+            return true;
         }
 
         if ((event == ftxui::Event::Character('p') || event == ftxui::Event::Character('P') || event == ftxui::Event::Character(L'з') || event == ftxui::Event::Character(L'З')) && matchState.phase == "pregame") {

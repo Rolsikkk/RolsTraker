@@ -390,6 +390,8 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
                 ftxui::text("  "),
                 chatBtn
             }) | ftxui::center,
+            ftxui::text(""),
+            ftxui::text(" [F11 / M] Развернуть на весь экран | [Q] Выход ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
             ftxui::filler(),
         });
     }
@@ -500,6 +502,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         ftxui::text(" "),
         header,
         ftxui::filler() | ftxui::flex,
+        ftxui::text(" [F11/M] На весь экран ") | ftxui::color(ftxui::Color::YellowLight),
         ftxui::text(" [Q] Выход ") | ftxui::color(ftxui::Color::GrayLight)
     }));
     uiElements.push_back(ftxui::separator());
