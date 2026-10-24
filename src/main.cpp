@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.0.2";
+const std::string CURRENT_VERSION = "v3.0.3";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -2984,68 +2984,58 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
 
 static HWND getTopLevelConsoleWindow() {
     HWND console = GetConsoleWindow();
-    if (!console) return NULL;
 
-    // 1. Classic conhost check
-    char className[256] = {0};
-    GetClassNameA(console, className, sizeof(className));
-    if (std::string(className) == "ConsoleWindowClass") {
-        HWND root = GetAncestor(console, GA_ROOT);
-        if (root && IsWindowVisible(root)) return root;
-        return console;
+    // 1. Check if console itself is classic ConHost
+    if (console) {
+        char className[256] = {0};
+        GetClassNameA(console, className, sizeof(className));
+        if (std::string(className) == "ConsoleWindowClass") {
+            HWND root = GetAncestor(console, GA_ROOT);
+            if (root && IsWindowVisible(root)) return root;
+            return console;
+        }
     }
 
-    // 2. Windows Terminal (OpenConsole.exe -> WindowsTerminal.exe)
-    DWORD currentPid = GetCurrentProcessId();
-    for (int depth = 0; depth < 5; ++depth) {
-        HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (hSnapshot == INVALID_HANDLE_VALUE) break;
+    // 2. Find Windows Terminal (CASCADIA_HOSTING_WINDOW_CLASS) or ConHost by title "RolsTraker"
+    // Explicitly IGNORE Explorer (CabinetWClass), Desktop (Progman/WorkerW), Taskbar (Shell_TrayWnd)
+    struct FindTermData {
+        HWND exactHwnd = NULL;
+        HWND fallbackHwnd = NULL;
+    } ft;
 
-        PROCESSENTRY32 pe = { sizeof(pe) };
-        DWORD parentPid = 0;
-        if (Process32First(hSnapshot, &pe)) {
-            do {
-                if (pe.th32ProcessID == currentPid) {
-                    parentPid = pe.th32ParentProcessID;
-                    break;
-                }
-            } while (Process32Next(hSnapshot, &pe));
-        }
-        CloseHandle(hSnapshot);
+    EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
+        auto* p = reinterpret_cast<FindTermData*>(lParam);
+        if (!IsWindowVisible(hwnd)) return TRUE;
 
-        if (parentPid == 0 || parentPid == currentPid) break;
+        char className[256] = {0};
+        GetClassNameA(hwnd, className, sizeof(className));
+        std::string cls(className);
 
-        struct FindData {
-            DWORD targetPid;
-            HWND foundHwnd = NULL;
-        } fd;
-        fd.targetPid = parentPid;
-
-        EnumWindows([](HWND hwnd, LPARAM lParam) -> BOOL {
-            auto* p = reinterpret_cast<FindData*>(lParam);
-            if (!IsWindowVisible(hwnd)) return TRUE;
-            DWORD pid = 0;
-            GetWindowThreadProcessId(hwnd, &pid);
-            if (pid == p->targetPid) {
-                RECT rc;
-                if (GetWindowRect(hwnd, &rc) && (rc.right - rc.left > 200) && (rc.bottom - rc.top > 200)) {
-                    p->foundHwnd = hwnd;
-                    return FALSE;
-                }
-            }
+        // Never touch File Explorer, Taskbar, or Desktop
+        if (cls == "CabinetWClass" || cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd") {
             return TRUE;
-        }, reinterpret_cast<LPARAM>(&fd));
-
-        if (fd.foundHwnd) {
-            return fd.foundHwnd;
         }
 
-        currentPid = parentPid;
-    }
+        if (cls == "CASCADIA_HOSTING_WINDOW_CLASS" || cls == "ConsoleWindowClass") {
+            char title[512] = {0};
+            GetWindowTextA(hwnd, title, sizeof(title));
+            std::string t(title);
+            if (t.find("RolsTraker") != std::string::npos || t.find("rolstraker") != std::string::npos) {
+                p->exactHwnd = hwnd;
+                return FALSE; // Exact match found!
+            }
+            if (!p->fallbackHwnd) {
+                p->fallbackHwnd = hwnd;
+            }
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&ft));
 
-    HWND root = GetAncestor(console, GA_ROOT);
-    if (root && IsWindowVisible(root)) return root;
-    return console;
+    if (ft.exactHwnd) return ft.exactHwnd;
+    if (ft.fallbackHwnd) return ft.fallbackHwnd;
+
+    if (console) return console;
+    return NULL;
 }
 
 static void applyOptimalWindowSize() {
@@ -3104,6 +3094,7 @@ static void applyOptimalWindowSize() {
 }
 
 int main() {
+    SetConsoleTitleA("RolsTraker");
     Log("Starting main()");
     SetUnhandledExceptionFilter(logUnhandledException);
     std::set_terminate(logTerminateHandler);
