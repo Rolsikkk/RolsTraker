@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.0.0";
+const std::string CURRENT_VERSION = "v3.0.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -2990,28 +2990,12 @@ int main() {
     Log("Settings loaded");
     if (!g_discordClientId.empty()) { initDiscordRpc(g_discordClientId); Log("Discord RPC init done"); }
     
-    // Set console buffer cols and lines
-    Log("Setting console mode");
-    system("mode con cols=155 lines=42");
-    
-    WSADATA wsaData;
-    WSAStartup(MAKEWORD(2, 2), &wsaData);
-    Log("WSAStartup done");
-
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCtrlHandler(CtrlHandler, TRUE);
-    signal(SIGINT, SIG_IGN);
-
-    // Disable Quick Edit Mode (prevents freezing program by mouse selection)
-    HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
-    DWORD prev_mode;
-    GetConsoleMode(hInput, &prev_mode);
-    SetConsoleMode(hInput, prev_mode & ~ENABLE_QUICK_EDIT_MODE);
-
     // Set optimal vertical / portrait window size (1080x1920 screen or primary monitor)
     HWND console = GetConsoleWindow();
+    bool foundPortrait = false;
+    RECT portraitRect = { 0, 0, 0, 0 };
+
     if (console) {
-        // Enumerate displays to find 1080x1920 (portrait) display if available
         struct EnumMonData {
             RECT targetRect;
             bool foundPortrait = false;
@@ -3033,14 +3017,48 @@ int main() {
             return TRUE;
         }, reinterpret_cast<LPARAM>(&emd));
 
+        foundPortrait = emd.foundPortrait;
+        portraitRect = emd.targetRect;
+    }
+
+    // Set console buffer cols and lines
+    Log("Setting console mode");
+    int conCols = foundPortrait ? 110 : 120;
+    int conLines = foundPortrait ? 55 : 40;
+    std::string modeCmd = "mode con cols=" + std::to_string(conCols) + " lines=" + std::to_string(conLines);
+    system(modeCmd.c_str());
+    
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+    Log("WSAStartup done");
+
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCtrlHandler(CtrlHandler, TRUE);
+    signal(SIGINT, SIG_IGN);
+
+    // Disable Quick Edit Mode (prevents freezing program by mouse selection)
+    HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD prev_mode;
+    GetConsoleMode(hInput, &prev_mode);
+    SetConsoleMode(hInput, prev_mode & ~ENABLE_QUICK_EDIT_MODE);
+
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut != INVALID_HANDLE_VALUE) {
+        COORD coord = { (SHORT)conCols, (SHORT)conLines };
+        SetConsoleScreenBufferSize(hOut, coord);
+        SMALL_RECT sRect = { 0, 0, (SHORT)(conCols - 1), (SHORT)(conLines - 1) };
+        SetConsoleWindowInfo(hOut, TRUE, &sRect);
+    }
+
+    if (console) {
         int startX = 20, startY = 20, targetW = 1040, targetH = 1800;
-        if (emd.foundPortrait) {
-            int workW = emd.targetRect.right - emd.targetRect.left;
-            int workH = emd.targetRect.bottom - emd.targetRect.top;
+        if (foundPortrait) {
+            int workW = portraitRect.right - portraitRect.left;
+            int workH = portraitRect.bottom - portraitRect.top;
             targetW = workW - 20;
             targetH = workH - 30;
-            startX = emd.targetRect.left + (workW - targetW) / 2;
-            startY = emd.targetRect.top + (workH - targetH) / 2;
+            startX = portraitRect.left + (workW - targetW) / 2;
+            startY = portraitRect.top + (workH - targetH) / 2;
         } else {
             HMONITOR hMon = MonitorFromWindow(console, MONITOR_DEFAULTTONEAREST);
             MONITORINFO mi = { sizeof(mi) };

@@ -255,20 +255,17 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
 
         // Kuronami badge
         if (p.hasKuronami) {
-            std::string kW = p.kuronamiWeapon.empty() ? "" : " " + p.kuronamiWeapon;
-            nameParts.push_back(ftxui::text(" [КУРОНАМИ" + kW + "]") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 30, 45)));
+            nameParts.push_back(ftxui::text(" [КУРОНАМИ]") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 30, 45)));
         }
 
         // Nocturnum / Остриё тьмы badge
         if (p.hasNocturnum) {
-            std::string nW = p.nocturnumWeapon.empty() ? "" : " " + p.nocturnumWeapon;
-            nameParts.push_back(ftxui::text(" [ОСТРИЁ ТЬМЫ" + nW + "]") | ftxui::bold | ftxui::color(ftxui::Color::MagentaLight) | ftxui::bgcolor(ftxui::Color::RGB(45, 10, 35)));
+            nameParts.push_back(ftxui::text(" [НОКТЮРНУМ]") | ftxui::bold | ftxui::color(ftxui::Color::MagentaLight) | ftxui::bgcolor(ftxui::Color::RGB(45, 10, 35)));
         }
 
         // Primordium / Первоначало badge
         if (p.hasPrimordium) {
-            std::string prW = p.primordiumWeapon.empty() ? "" : " " + p.primordiumWeapon;
-            nameParts.push_back(ftxui::text(" [ПЕРВОНАЧАЛО" + prW + "]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::bgcolor(ftxui::Color::RGB(55, 15, 10)));
+            nameParts.push_back(ftxui::text(" [ПРИМОРДИУМ]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::bgcolor(ftxui::Color::RGB(55, 15, 10)));
         }
 
         // Smurf & Booster detection
@@ -277,11 +274,7 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
             nameParts.push_back(ftxui::text(" [SMURF]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
         }
         if (p.isBooster) {
-            std::string bStr = " [БУСТЕР]";
-            if (p.customSkinCount >= 0) {
-                bStr = " [БУСТЕР (" + std::to_string(p.customSkinCount) + " ск.)]";
-            }
-            nameParts.push_back(ftxui::text(bStr) | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
+            nameParts.push_back(ftxui::text(" [БУСТЕР]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
         }
 
         nameElement = ftxui::hbox(nameParts) | ftxui::reflect(g_playerBoxes[p.puuid]);
@@ -439,7 +432,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     }
 
     auto termSize = ftxui::Terminal::Size();
-    bool sideBySide = (termSize.dimx >= 155);
+    bool sideBySide = (termSize.dimx >= 180 && termSize.dimy < 50);
 
     ftxui::Element teamsElement;
     if (!team1.empty() && !team2.empty()) {
@@ -453,9 +446,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             });
         } else {
             teamsElement = ftxui::vbox({
-                t1,
+                t1 | ftxui::center,
                 ftxui::separator(),
-                t2
+                t2 | ftxui::center
             });
         }
     } else {
