@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.1.0";
+const std::string CURRENT_VERSION = "v3.1.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -626,6 +626,7 @@ struct PlayerInfo {
 
 struct ValorantChatMessage {
     std::string id;
+    std::string cid;
     std::string senderPuuid;
     std::string senderName;
     std::string senderAgent;
@@ -2913,7 +2914,7 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
     if (lock.port == 0 || lock.password.empty()) return;
     std::string authHeader = "Basic " + base64_encode("riot:" + lock.password);
 
-    // Auto-discover conversation IDs if not yet known
+    // Auto-discover conversation IDs from client
     static auto s_lastConvQuery = std::chrono::steady_clock::now() - std::chrono::seconds(30);
     if (g_chatCurrentCoreCid.empty() || g_chatCurrentAllCid.empty() ||
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - s_lastConvQuery).count() > 10) {
@@ -2929,10 +2930,10 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
                 for (const auto& cItem : arr) {
                     std::string cid = getJsonKeyStr(cItem, {"cid", "id"});
                     std::string cType = getJsonKeyStr(cItem, {"type"});
-                    if (cid.find("@ares-coregame") != std::string::npos || cid.find("@ares-pregame") != std::string::npos) {
-                        if (cid.find("-all") != std::string::npos || cType == "all") {
+                    if (!cid.empty()) {
+                        if (cType == "all" || cid.find("-all") != std::string::npos) {
                             g_chatCurrentAllCid = cid;
-                        } else {
+                        } else if (g_chatCurrentCoreCid.empty()) {
                             g_chatCurrentCoreCid = cid;
                         }
                     }
@@ -2952,11 +2953,18 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
         auto j = json::parse(res.body);
         if (!j.contains("messages") || !j["messages"].is_array()) return;
 
-        // Build PUUID -> (Name, Agent, Team) map from state
+        // Build PUUID -> PlayerInfo and Name -> PlayerInfo maps from state
         std::map<std::string, PlayerInfo> playerMap;
+        std::map<std::string, PlayerInfo> playerNameMap;
         std::string localTeam = "";
         for (const auto& p : state.players) {
             playerMap[p.puuid] = p;
+            if (!p.gameName.empty()) {
+                playerNameMap[toLowerUtf8(p.gameName)] = p;
+                if (!p.tagLine.empty()) {
+                    playerNameMap[toLowerUtf8(p.gameName + "#" + p.tagLine)] = p;
+                }
+            }
             if (!localPuuid.empty() && p.puuid == localPuuid) {
                 localTeam = p.teamId;
             }
@@ -2967,12 +2975,10 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
             std::string cid = getJsonKeyStr(m, {"cid"});
             std::string chatType = getJsonKeyStr(m, {"type"}); // "all", "group", "whisper", etc.
             if (!cid.empty()) {
-                if (cid.find("@ares-coregame") != std::string::npos || cid.find("@ares-pregame") != std::string::npos) {
-                    if (cid.find("-all") != std::string::npos || chatType == "all") {
-                        g_chatCurrentAllCid = cid;
-                    } else {
-                        g_chatCurrentCoreCid = cid;
-                    }
+                if (chatType == "all" || cid.find("-all") != std::string::npos) {
+                    g_chatCurrentAllCid = cid;
+                } else {
+                    g_chatCurrentCoreCid = cid;
                 }
             }
 
@@ -2992,27 +2998,37 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
 
             ValorantChatMessage vcm;
             vcm.id = msgId;
+            vcm.cid = cid;
             vcm.senderPuuid = senderPuuid;
             vcm.text = body;
             vcm.chatType = chatType.empty() ? "team" : chatType;
             vcm.translated = translateGamingChat(body);
 
-            // Match with active player info
-            if (playerMap.count(senderPuuid)) {
-                const auto& p = playerMap[senderPuuid];
-                vcm.senderName = p.gameName.empty() ? p.characterId : p.gameName;
-                vcm.senderAgent = p.agentName;
-                if (vcm.senderAgent.empty() && !p.characterId.empty()) {
-                    std::string c_id = p.characterId;
+            // Match with active player info by PUUID or by Name
+            const PlayerInfo* matchedPlayer = nullptr;
+            if (!senderPuuid.empty() && playerMap.count(senderPuuid)) {
+                matchedPlayer = &playerMap[senderPuuid];
+            } else if (!gameName.empty()) {
+                std::string gnLower = toLowerUtf8(gameName);
+                if (playerNameMap.count(gnLower)) {
+                    matchedPlayer = &playerNameMap[gnLower];
+                }
+            }
+
+            if (matchedPlayer) {
+                vcm.senderName = matchedPlayer->gameName.empty() ? (gameName.empty() ? "Игрок" : gameName) : matchedPlayer->gameName;
+                vcm.senderAgent = matchedPlayer->agentName;
+                if (vcm.senderAgent.empty() && !matchedPlayer->characterId.empty()) {
+                    std::string c_id = matchedPlayer->characterId;
                     for (auto& c : c_id) c = tolower(c);
                     if (agentMap.count(c_id)) vcm.senderAgent = agentMap.at(c_id);
-                    else if (agentMap.count(p.characterId)) vcm.senderAgent = agentMap.at(p.characterId);
+                    else if (agentMap.count(matchedPlayer->characterId)) vcm.senderAgent = agentMap.at(matchedPlayer->characterId);
                 }
-                vcm.teamId = p.teamId;
+                vcm.teamId = matchedPlayer->teamId;
                 if (!localTeam.empty()) {
-                    vcm.isEnemy = (p.teamId != localTeam);
+                    vcm.isEnemy = (matchedPlayer->teamId != localTeam);
                 } else {
-                    vcm.isEnemy = (p.teamId == "Red" || p.teamId == "Defender");
+                    vcm.isEnemy = (matchedPlayer->teamId == "Red" || matchedPlayer->teamId == "Defender");
                 }
             } else {
                 vcm.senderName = gameName.empty() ? "Игрок" : gameName;
@@ -3064,7 +3080,11 @@ static void sendValorantChatMessage(const std::string& rawText, const std::strin
     }
 
     if (lock.port == 0 || lock.password.empty()) {
-        g_chatStatusMessage = "Ошибка: Valorant не обнаружен";
+        lock = readLockfile();
+    }
+
+    if (lock.port == 0 || lock.password.empty()) {
+        g_chatStatusMessage = "Ошибка: Valorant не обнаружен (lockfile отсутствует)";
         g_chatStatusTime = std::chrono::steady_clock::now();
         if (screen) screen->PostEvent(ftxui::Event::Custom);
         return;
@@ -3072,6 +3092,7 @@ static void sendValorantChatMessage(const std::string& rawText, const std::strin
 
     std::string authHeader = "Basic " + base64_encode("riot:" + lock.password);
 
+    // Refresh conversation IDs if empty
     if (g_chatCurrentCoreCid.empty() || (targetChannel == "all" && g_chatCurrentAllCid.empty())) {
         auto convRes = httpRequest("GET", "127.0.0.1", lock.port, "/chat/v6/conversations", {{"Authorization", authHeader}}, "", true, true);
         if (convRes.statusCode != 200) {
@@ -3084,10 +3105,10 @@ static void sendValorantChatMessage(const std::string& rawText, const std::strin
                 for (const auto& cItem : arr) {
                     std::string cid = getJsonKeyStr(cItem, {"cid", "id"});
                     std::string cType = getJsonKeyStr(cItem, {"type"});
-                    if (cid.find("@ares-coregame") != std::string::npos || cid.find("@ares-pregame") != std::string::npos) {
-                        if (cid.find("-all") != std::string::npos || cType == "all") {
+                    if (!cid.empty()) {
+                        if (cType == "all" || cid.find("-all") != std::string::npos) {
                             g_chatCurrentAllCid = cid;
-                        } else {
+                        } else if (g_chatCurrentCoreCid.empty()) {
                             g_chatCurrentCoreCid = cid;
                         }
                     }
@@ -3096,25 +3117,19 @@ static void sendValorantChatMessage(const std::string& rawText, const std::strin
         }
     }
 
-    if (g_chatCurrentCoreCid.empty() && !state.matchId.empty()) {
-        if (state.phase == "coregame") {
-            g_chatCurrentCoreCid = state.matchId + "@ares-coregame.valorant.riotgames.com";
-            g_chatCurrentAllCid = state.matchId + "-all@ares-coregame.valorant.riotgames.com";
-        } else if (state.phase == "pregame") {
-            g_chatCurrentCoreCid = state.matchId + "@ares-pregame.valorant.riotgames.com";
+    std::string targetCid = (targetChannel == "all" && !g_chatCurrentAllCid.empty()) ? g_chatCurrentAllCid : g_chatCurrentCoreCid;
+    if (targetCid.empty()) {
+        std::lock_guard<std::mutex> lk(g_chatMutex);
+        for (auto it = g_chatMessages.rbegin(); it != g_chatMessages.rend(); ++it) {
+            if (!it->cid.empty()) {
+                targetCid = it->cid;
+                break;
+            }
         }
     }
 
-    std::string targetCid = (targetChannel == "all" && !g_chatCurrentAllCid.empty()) ? g_chatCurrentAllCid : g_chatCurrentCoreCid;
-    if (targetCid.empty() && targetChannel == "all" && !state.matchId.empty()) {
-        targetCid = state.matchId + "-all@ares-coregame.valorant.riotgames.com";
-    }
-    if (targetCid.empty() && !g_chatCurrentCoreCid.empty()) {
-        targetCid = g_chatCurrentCoreCid;
-    }
-
     if (targetCid.empty()) {
-        g_chatStatusMessage = "Ошибка: активный чат не найден (вы не в матче)";
+        g_chatStatusMessage = "Ошибка: активный чат не найден (вы не в матче или нет сообщений)";
         g_chatStatusTime = std::chrono::steady_clock::now();
         if (screen) screen->PostEvent(ftxui::Event::Custom);
         return;
@@ -3123,10 +3138,10 @@ static void sendValorantChatMessage(const std::string& rawText, const std::strin
     std::string sentChannel = targetChannel;
     std::thread([lock, authHeader, targetCid, textToSend, sentChannel, screen]() {
         try {
+            // Note: omitting type lets Riot Client automatically infer the room/conversation type
             json postPayload = {
                 {"cid", targetCid},
-                {"message", textToSend},
-                {"type", "groupchat"}
+                {"message", textToSend}
             };
             std::string body = postPayload.dump();
             auto res = httpRequest("POST", "127.0.0.1", lock.port, "/chat/v6/messages", {{"Authorization", authHeader}, {"Content-Type", "application/json"}}, body, true, true);
@@ -3140,6 +3155,7 @@ static void sendValorantChatMessage(const std::string& rawText, const std::strin
 
                 ValorantChatMessage vcm;
                 vcm.id = "local_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+                vcm.cid = targetCid;
                 vcm.senderName = "ВЫ";
                 vcm.text = textToSend;
                 vcm.chatType = sentChannel;
@@ -3904,70 +3920,18 @@ int main() {
     renderer = ftxui::CatchEvent(renderer, [&](ftxui::Event event) {
         std::lock_guard<std::mutex> lk(g_mutex);
 
-        if (event == ftxui::Event::Character('q') || event == ftxui::Event::Character('Q') || event == ftxui::Event::Character(L'й') || event == ftxui::Event::Character(L'Й')) {
-            g_running = false;
-            screen.ExitLoopClosure()();
-            return true;
-        }
-        
-        if (event == ftxui::Event::Special("\x03") || (event.is_character() && event.character() == "\x03")) { // Ctrl+C
+        // Block Ctrl+C from closing app
+        if (event == ftxui::Event::Special("\x03") || (event.is_character() && event.character() == "\x03")) {
             return true; 
         }
 
-        if (event == ftxui::Event::F11 || event == ftxui::Event::Character('m') || event == ftxui::Event::Character('M') || event == ftxui::Event::Character(L'ь') || event == ftxui::Event::Character(L'Ь')) {
-            HWND hWin = getTopLevelConsoleWindow();
-            if (hWin) {
-                WINDOWPLACEMENT wp = { sizeof(wp) };
-                if (GetWindowPlacement(hWin, &wp)) {
-                    if (wp.showCmd == SW_SHOWMAXIMIZED) {
-                        ShowWindow(hWin, SW_RESTORE);
-                    } else {
-                        ShowWindow(hWin, SW_MAXIMIZE);
-                    }
-                }
-            }
-            return true;
-        }
-
-        if ((event == ftxui::Event::Character('p') || event == ftxui::Event::Character('P') || event == ftxui::Event::Character(L'з') || event == ftxui::Event::Character(L'З')) && matchState.phase == "pregame") {
-            g_pickStatusMsg = "";
-            g_currentView = (g_currentView == AppView::AGENT_PICK) ? AppView::MAIN : AppView::AGENT_PICK;
-            return true;
-        }
-
-        if (event == ftxui::Event::Character('r') || event == ftxui::Event::Character('R') || event == ftxui::Event::Character(L'к') || event == ftxui::Event::Character(L'К')) {
-            g_reportStatusMsg = "";
-            g_currentView = (g_currentView == AppView::REPORT) ? AppView::MAIN : AppView::REPORT;
-            return true;
-        }
-        
-        if (g_currentView == AppView::PLAYER_STATS) {
-            if (event == ftxui::Event::Character('1') || event == ftxui::Event::Character('s') || event == ftxui::Event::Character('S') || event == ftxui::Event::Character(L'ы') || event == ftxui::Event::Character(L'Ы')) {
-                g_playerProfileTab = PlayerProfileTab::SKINS;
-                fetchPlayerLoadoutDirect(session, g_selectedPuuid);
-                return true;
-            }
-            if (event == ftxui::Event::Character('2') || event == ftxui::Event::Character('t') || event == ftxui::Event::Character('T') || event == ftxui::Event::Character(L'е') || event == ftxui::Event::Character(L'Е')) {
-                g_playerProfileTab = PlayerProfileTab::STATS;
-                return true;
-            }
-            if (event == ftxui::Event::Character('o') || event == ftxui::Event::Character('O') || event == ftxui::Event::Character(L'щ') || event == ftxui::Event::Character(L'Щ')) {
-                openTrackerInBrowser(g_selectedPlayerInfo.gameName, g_selectedPlayerInfo.tagLine);
-                return true;
-            }
-        }
-
-        // CHAT view keyboard typing, send, tab and backspace
+        // Only when in CHAT view: allow typing into input field, Backspace and Return
         if (g_currentView == AppView::CHAT) {
             if (event == ftxui::Event::Return) {
                 if (!g_chatInputText.empty()) {
                     sendValorantChatMessage(g_chatInputText, g_chatTargetChannel, &screen);
                     g_chatInputText.clear();
                 }
-                return true;
-            }
-            if (event == ftxui::Event::Tab) {
-                g_chatTargetChannel = (g_chatTargetChannel == "team") ? "all" : "team";
                 return true;
             }
             if (event == ftxui::Event::Backspace) {
@@ -3988,13 +3952,7 @@ int main() {
             }
         }
 
-        // Hotkey C / С for match chat (only when not in CHAT view)
-        if (g_currentView != AppView::CHAT && (event == ftxui::Event::Character('c') || event == ftxui::Event::Character('C') || event == ftxui::Event::Character(L'с') || event == ftxui::Event::Character(L'С'))) {
-            g_currentView = AppView::CHAT;
-            return true;
-        }
-
-        // ESC only returns to main view, NEVER closes the program!
+        // ESC returns to main view from any sub-view, NEVER closes the program!
         if (event == ftxui::Event::Escape) {
             if (g_showPostMatch) {
                 g_showPostMatch = false;
@@ -4006,10 +3964,14 @@ int main() {
                 g_currentView = AppView::MAIN;
                 return true;
             }
-            // If already in MAIN view, ignore ESC so program never accidentally closes!
             return true;
         }
-        
+
+        // All other keyboard keys are completely ignored (NO HOTKEYS)! Control is 100% mouse-driven!
+        if (!event.is_mouse()) {
+            return true;
+        }
+
         bool is_mouse_motion = false;
         if (event.is_mouse()) {
             g_mouseX = event.mouse().x;

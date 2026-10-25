@@ -370,10 +370,10 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         auto myStatsBtn = renderButton("Моя статистика (Tracker.gg)", g_myStatsBox, ftxui::Color::CyanLight, "my_stats", g_mousePressed)
                         | ftxui::reflect(g_myStatsBox);
 
-        auto reportBtn = renderButton("⚠ РЕПОРТ ВРАГОВ (R)", g_reportOpenBox, ftxui::Color::RedLight, "report_open", g_mousePressed)
+        auto reportBtn = renderButton("⚠ РЕПОРТ ВРАГОВ", g_reportOpenBox, ftxui::Color::RedLight, "report_open", g_mousePressed)
                        | ftxui::reflect(g_reportOpenBox);
 
-        auto chatBtn = renderButton("ЧАТ МАТЧА (C)", g_chatOpenBox, ftxui::Color::GreenLight, "chat_open", g_mousePressed)
+        auto chatBtn = renderButton("ЧАТ МАТЧА", g_chatOpenBox, ftxui::Color::GreenLight, "chat_open", g_mousePressed)
                      | ftxui::reflect(g_chatOpenBox);
 
         return ftxui::vbox({
@@ -530,9 +530,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         (state.phase == "pregame" ? (
             !g_dodgeConfirm
             ? ftxui::hbox({
-                renderButton("УКЛОНИТЬСЯ (DODGE)", g_dodgeButtonBox, ftxui::Color::RedLight, "dodge", g_mousePressed) | ftxui::reflect(g_dodgeButtonBox),
+                renderButton("УКЛОНИТЬСЯ", g_dodgeButtonBox, ftxui::Color::RedLight, "dodge", g_mousePressed) | ftxui::reflect(g_dodgeButtonBox),
                 ftxui::text(" "),
-                renderButton("ВЫБРАТЬ АГЕНТА (P)", g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox)
+                renderButton("ВЫБРАТЬ АГЕНТА", g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox)
             })
             : ftxui::hbox({
                 ftxui::text(" Выйти? ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
@@ -544,9 +544,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         ftxui::filler() | ftxui::flex,
         renderButton("Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
         ftxui::text("  "),
-        renderButton("ЧАТ МАТЧА (C)", g_chatOpenBox, ftxui::Color::GreenLight, "chat_open", g_mousePressed) | ftxui::reflect(g_chatOpenBox),
+        renderButton("ЧАТ МАТЧА", g_chatOpenBox, ftxui::Color::GreenLight, "chat_open", g_mousePressed) | ftxui::reflect(g_chatOpenBox),
         ftxui::text("  "),
-        renderButton("⚠ РЕПОРТ ВРАГОВ (R)", g_reportOpenBox, ftxui::Color::RedLight, "report_open", g_mousePressed) | ftxui::reflect(g_reportOpenBox),
+        renderButton("⚠ РЕПОРТ ВРАГОВ", g_reportOpenBox, ftxui::Color::RedLight, "report_open", g_mousePressed) | ftxui::reflect(g_reportOpenBox),
         ftxui::filler() | ftxui::flex,
         (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) : ftxui::text(""))
     }));

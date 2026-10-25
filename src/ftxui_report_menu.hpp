@@ -110,7 +110,7 @@ inline ftxui::Element renderReportEnemyMenu(const MatchState& state, const Sessi
         });
     }
 
-    auto closeBtn = renderButton("⬅ НАЗАД В МАТЧ (ESC)", g_reportCloseBox, Color::GrayLight, "report_close", g_mousePressed)
+    auto closeBtn = renderButton("⬅ НАЗАД В МАТЧ", g_reportCloseBox, Color::GrayLight, "report_close", g_mousePressed)
                   | reflect(g_reportCloseBox)
                   | center;
 

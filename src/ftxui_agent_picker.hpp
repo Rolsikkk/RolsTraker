@@ -148,7 +148,7 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
         }) | center;
     }
 
-    auto backBtn = renderButton("ESC - Назад к матчу", g_agentPickerBackBox, Color::GrayLight, "agent_picker_back", g_mousePressed) 
+    auto backBtn = renderButton("Назад к матчу", g_agentPickerBackBox, Color::GrayLight, "agent_picker_back", g_mousePressed) 
                  | reflect(g_agentPickerBackBox) 
                  | center;
 

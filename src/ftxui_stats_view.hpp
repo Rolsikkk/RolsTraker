@@ -14,8 +14,8 @@
 inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>& agentMap, const std::map<std::string, std::string>& mapNameMap) {
     using namespace ftxui;
 
-    auto backBtn = renderButton("ESC - Назад", g_backButtonBox, Color::CyanLight, "back", g_mousePressed) | reflect(g_backButtonBox);
-    auto trackerBtn = renderButton("Открыть Tracker.gg (O)", g_openTrackerBox, Color::GreenLight, "open_tracker", g_mousePressed) | reflect(g_openTrackerBox);
+    auto backBtn = renderButton("Назад", g_backButtonBox, Color::CyanLight, "back", g_mousePressed) | reflect(g_backButtonBox);
+    auto trackerBtn = renderButton("Открыть Tracker.gg", g_openTrackerBox, Color::GreenLight, "open_tracker", g_mousePressed) | reflect(g_openTrackerBox);
     
     std::string fullName = g_selectedPlayerInfo.gameName + (g_selectedPlayerInfo.tagLine.empty() ? "" : "#" + g_selectedPlayerInfo.tagLine);
     ftxui::Element nameTitle = text(fullName) | bold | color(Color::White);

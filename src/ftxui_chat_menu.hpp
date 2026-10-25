@@ -92,7 +92,7 @@ inline ftxui::Element renderChatMenu() {
 
     auto listPane = vbox(std::move(msgElements)) | yframe | flex;
 
-    auto backBtn = renderButton("НАЗАД (ESC)", g_chatCloseBox, Color::CyanLight, "chat_close", g_mousePressed)
+    auto backBtn = renderButton("НАЗАД", g_chatCloseBox, Color::CyanLight, "chat_close", g_mousePressed)
                  | reflect(g_chatCloseBox);
     auto clearBtn = renderButton("ОЧИСТИТЬ ЧАТ", g_chatClearBox, Color::GrayLight, "chat_clear", g_mousePressed)
                   | reflect(g_chatClearBox);
@@ -107,7 +107,7 @@ inline ftxui::Element renderChatMenu() {
     }) | bgcolor(Color::RGB(18, 25, 40));
 
     // Channel toggle button
-    std::string chanLabel = (g_chatTargetChannel == "all") ? "[ Канал: ВСЕМ / ALL (Tab) ]" : "[ Канал: КОМАНДЕ / TEAM (Tab) ]";
+    std::string chanLabel = (g_chatTargetChannel == "all") ? "[ Канал: ВСЕМ / ALL ]" : "[ Канал: КОМАНДЕ / TEAM ]";
     Color chanColor = (g_chatTargetChannel == "all") ? Color::YellowLight : Color::CyanLight;
     auto chanBtn = renderButton(chanLabel, g_chatChannelBox, chanColor, "chat_channel", g_mousePressed)
                  | reflect(g_chatChannelBox);
@@ -134,7 +134,7 @@ inline ftxui::Element renderChatMenu() {
     std::string displayInput = g_chatInputText.empty() ? "Введите текст сообщения..." : g_chatInputText;
     Color inputColor = g_chatInputText.empty() ? Color::GrayDark : Color::White;
 
-    auto sendBtn = renderButton("ОТПРАВИТЬ (Enter)", g_chatSendBox, Color::GreenLight, "chat_send", g_mousePressed)
+    auto sendBtn = renderButton("ОТПРАВИТЬ", g_chatSendBox, Color::GreenLight, "chat_send", g_mousePressed)
                  | reflect(g_chatSendBox);
 
     auto inputRow = hbox({
@@ -154,7 +154,7 @@ inline ftxui::Element renderChatMenu() {
                    ? Color::RedLight : Color::GreenLight;
         statusRow = text(" " + g_chatStatusMessage + " ") | bold | color(sCol);
     } else {
-        statusRow = text(" Подсказка: Введите текст и нажмите Enter. Tab переключает канал [Команда / Все]. Маты цензурятся автоматически!")
+        statusRow = text(" Подсказка: Введите текст и нажмите [ОТПРАВИТЬ] или Enter. Кликните по [Канал] для смены команды/всех.")
                   | color(Color::GrayLight);
     }
 
