@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.1.1";
+const std::string CURRENT_VERSION = "v3.1.2";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -75,7 +75,7 @@ static std::map<std::string, RankCacheEntry> g_rankCache;
 static std::map<std::string, PlayerStats> g_statsCache;
 static std::set<std::string> g_statsFetching;
 
-static std::mutex g_mutex;
+static std::recursive_mutex g_mutex;
 static std::atomic<bool> g_running{true};
 std::string g_updateStatus;
 std::mutex g_updateMutex;
@@ -1404,7 +1404,7 @@ inline std::string resolveAgentName(const std::string& characterId) {
 
 void fetchPlayerStats(const Session& session, const std::string& puuid, const std::string& gameName, const std::string& tagLine) {
     if (!g_running || puuid.empty()) {
-        std::lock_guard<std::mutex> lk(g_mutex);
+        std::lock_guard<std::recursive_mutex> lk(g_mutex);
         g_statsFetching.erase(puuid);
         return;
     }
@@ -1416,7 +1416,7 @@ void fetchPlayerStats(const Session& session, const std::string& puuid, const st
     std::string actualName = gameName;
     std::string actualTag = tagLine;
     if (actualName.empty() || actualName == "Player" || actualTag.empty()) {
-        std::lock_guard<std::mutex> lk(g_mutex);
+        std::lock_guard<std::recursive_mutex> lk(g_mutex);
         if (g_nameCache.count(puuid)) {
             actualName = g_nameCache[puuid].first;
             actualTag = g_nameCache[puuid].second;
@@ -1640,7 +1640,7 @@ void fetchPlayerStats(const Session& session, const std::string& puuid, const st
     }
 
     {
-        std::lock_guard<std::mutex> lk(g_mutex);
+        std::lock_guard<std::recursive_mutex> lk(g_mutex);
         if (g_statsCache.size() > 500) g_statsCache.erase(g_statsCache.begin());
         g_statsCache[puuid] = stats;
         g_statsFetching.erase(puuid);
@@ -1683,7 +1683,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
 
     std::vector<std::string> uncachedNamesPuuids;
     {
-        std::lock_guard<std::mutex> lk(g_mutex);
+        std::lock_guard<std::recursive_mutex> lk(g_mutex);
         for (auto& p : players) {
             if (g_nameCache.count(p.puuid)) {
                 p.gameName = g_nameCache[p.puuid].first;
@@ -1722,7 +1722,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
         if (nameRes.statusCode == 200) {
             try {
                 auto j = json::parse(nameRes.body);
-                std::lock_guard<std::mutex> lk(g_mutex);
+                std::lock_guard<std::recursive_mutex> lk(g_mutex);
                 for (const auto& item : j) {
                     std::string subject = getJsonKeyStr(item, {"Subject", "subject"});
                     std::string gameName = getJsonKeyStr(item, {"GameName", "gameName"});
@@ -1734,7 +1734,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
             } catch (...) {}
         }
         {
-            std::lock_guard<std::mutex> lk(g_mutex);
+            std::lock_guard<std::recursive_mutex> lk(g_mutex);
             for (auto& p : players) {
                 if (g_nameCache.count(p.puuid)) {
                     p.gameName = g_nameCache[p.puuid].first;
@@ -1752,7 +1752,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
     for (auto& p : players) {
         bool shouldFetch = false;
         {
-            std::lock_guard<std::mutex> lk(g_mutex);
+            std::lock_guard<std::recursive_mutex> lk(g_mutex);
             if (g_rankCache.count(p.puuid)) {
                 p.rankTier = g_rankCache[p.puuid].tier;
                 p.rankRR = g_rankCache[p.puuid].rr;
@@ -1855,7 +1855,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                 }
 
                 if (mmrRes.statusCode == 200) {
-                    std::lock_guard<std::mutex> lk(g_mutex);
+                    std::lock_guard<std::recursive_mutex> lk(g_mutex);
                     if (g_rankCache.size() > 500) g_rankCache.erase(g_rankCache.begin());
                     g_rankCache[p.puuid] = {tier, rr, totalWins, std::max(0, totalGames - totalWins), peakTier, peakRR};
                     for (auto& lp : g_liveMatchState.players) {
@@ -1870,7 +1870,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                     }
                 }
                 {
-                    std::lock_guard<std::mutex> lk(g_mutex);
+                    std::lock_guard<std::recursive_mutex> lk(g_mutex);
                     g_statsFetching.erase(p.puuid + "_mmr");
                 }
             }).detach();
@@ -1880,7 +1880,7 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
 
     // 3. Resolve stats (Tracker.gg with instant Riot Match API fallback)
     {
-        std::lock_guard<std::mutex> lk(g_mutex);
+        std::lock_guard<std::recursive_mutex> lk(g_mutex);
         int fetchDelayMs = 0;
         for (auto& p : players) {
             if (g_statsCache.count(p.puuid)) {
@@ -2074,7 +2074,7 @@ static bool launchUrlInBrowser(const std::string& url) {
 
 void openTrackerInBrowser(std::string gName, std::string tLine) {
     if (gName.empty() && !g_selectedPuuid.empty()) {
-        std::lock_guard<std::mutex> lk(g_mutex);
+        std::lock_guard<std::recursive_mutex> lk(g_mutex);
         if (g_nameCache.count(g_selectedPuuid)) {
             gName = g_nameCache[g_selectedPuuid].first;
             if (tLine.empty()) tLine = g_nameCache[g_selectedPuuid].second;
@@ -2565,7 +2565,7 @@ static void fetchPlayerLoadoutDirect(const Session& session, const std::string& 
         std::string matchId;
         std::string phase;
         {
-            std::lock_guard<std::mutex> lk(g_mutex);
+            std::lock_guard<std::recursive_mutex> lk(g_mutex);
             matchId = g_liveMatchState.matchId;
             phase = g_liveMatchState.phase;
         }
@@ -2931,10 +2931,12 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
                     std::string cid = getJsonKeyStr(cItem, {"cid", "id"});
                     std::string cType = getJsonKeyStr(cItem, {"type"});
                     if (!cid.empty()) {
-                        if (cType == "all" || cid.find("-all") != std::string::npos) {
-                            g_chatCurrentAllCid = cid;
-                        } else if (g_chatCurrentCoreCid.empty()) {
-                            g_chatCurrentCoreCid = cid;
+                        if (cid.find("@ares-coregame") != std::string::npos || cid.find("@ares-pregame") != std::string::npos) {
+                            if (cid.find("-all") != std::string::npos || cType == "all") {
+                                g_chatCurrentAllCid = cid;
+                            } else {
+                                g_chatCurrentCoreCid = cid;
+                            }
                         }
                     }
                 }
@@ -2973,13 +2975,17 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
         std::vector<ValorantChatMessage> newMessages;
         for (const auto& m : j["messages"]) {
             std::string cid = getJsonKeyStr(m, {"cid"});
-            std::string chatType = getJsonKeyStr(m, {"type"}); // "all", "group", "whisper", etc.
-            if (!cid.empty()) {
-                if (chatType == "all" || cid.find("-all") != std::string::npos) {
-                    g_chatCurrentAllCid = cid;
-                } else {
-                    g_chatCurrentCoreCid = cid;
-                }
+            std::string rawType = getJsonKeyStr(m, {"type"}); // "all", "group", "whisper", "chat"
+
+            std::string chatType = "team";
+            if (rawType == "all" || cid.find("-all") != std::string::npos) {
+                chatType = "all";
+                g_chatCurrentAllCid = cid;
+            } else if (cid.find("@ares-coregame") != std::string::npos || cid.find("@ares-pregame") != std::string::npos) {
+                chatType = "team";
+                g_chatCurrentCoreCid = cid;
+            } else if (cid.find("@ares-parties") != std::string::npos || cid.find(".pvp.net") != std::string::npos) {
+                chatType = "party";
             }
 
             std::string msgId = getJsonKeyStr(m, {"id"});
@@ -3001,7 +3007,7 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
             vcm.cid = cid;
             vcm.senderPuuid = senderPuuid;
             vcm.text = body;
-            vcm.chatType = chatType.empty() ? "team" : chatType;
+            vcm.chatType = chatType;
             vcm.translated = translateGamingChat(body);
 
             // Match with active player info by PUUID or by Name
@@ -3051,49 +3057,49 @@ static void fetchChatMessages(const Lockfile& lock, const MatchState& state, con
 }
 
 static void sendValorantChatMessage(const std::string& rawText, const std::string& targetChannel, ftxui::ScreenInteractive* screen = nullptr) {
-    std::string textToSend = rawText;
-    while (!textToSend.empty() && (textToSend.front() == ' ' || textToSend.front() == '\t')) textToSend.erase(textToSend.begin());
-    while (!textToSend.empty() && (textToSend.back() == ' ' || textToSend.back() == '\t')) textToSend.pop_back();
-    if (textToSend.empty()) return;
+    try {
+        std::string textToSend = rawText;
+        while (!textToSend.empty() && (textToSend.front() == ' ' || textToSend.front() == '\t')) textToSend.erase(textToSend.begin());
+        while (!textToSend.empty() && (textToSend.back() == ' ' || textToSend.back() == '\t')) textToSend.pop_back();
+        if (textToSend.empty()) return;
 
-    // Filter profanity and slurs to prevent Riot bans
-    FilterResult fr = filterProfanityAndSlurs(textToSend);
-    if (fr.isHardBanned) {
-        g_chatStatusMessage = "Заблокировано: запрещенное/оскорбительное слово!";
-        g_chatStatusTime = std::chrono::steady_clock::now();
-        if (screen) screen->PostEvent(ftxui::Event::Custom);
-        return;
-    }
-    textToSend = fr.text;
+        // Filter profanity and slurs to prevent Riot bans
+        FilterResult fr = filterProfanityAndSlurs(textToSend);
+        if (fr.isHardBanned) {
+            g_chatStatusMessage = "Заблокировано: запрещенное/оскорбительное слово!";
+            g_chatStatusTime = std::chrono::steady_clock::now();
+            if (screen) screen->PostEvent(ftxui::Event::Custom);
+            return;
+        }
+        textToSend = fr.text;
 
-    // Optional Russian to English translation
-    if (g_chatAutoTranslateRuToEn) {
-        textToSend = translateRussianToEnglish(textToSend);
-    }
+        // Optional Russian to English translation
+        if (g_chatAutoTranslateRuToEn) {
+            textToSend = translateRussianToEnglish(textToSend);
+        }
 
-    Lockfile lock;
-    MatchState state;
-    {
-        std::lock_guard<std::mutex> lk(g_mutex);
-        lock = g_liveLock;
-        state = g_liveMatchState;
-    }
+        Lockfile lock;
+        MatchState state;
+        {
+            std::lock_guard<std::recursive_mutex> lk(g_mutex);
+            lock = g_liveLock;
+            state = g_liveMatchState;
+        }
 
-    if (lock.port == 0 || lock.password.empty()) {
-        lock = readLockfile();
-    }
+        if (lock.port == 0 || lock.password.empty()) {
+            lock = readLockfile();
+        }
 
-    if (lock.port == 0 || lock.password.empty()) {
-        g_chatStatusMessage = "Ошибка: Valorant не обнаружен (lockfile отсутствует)";
-        g_chatStatusTime = std::chrono::steady_clock::now();
-        if (screen) screen->PostEvent(ftxui::Event::Custom);
-        return;
-    }
+        if (lock.port == 0 || lock.password.empty()) {
+            g_chatStatusMessage = "Ошибка: Valorant не обнаружен";
+            g_chatStatusTime = std::chrono::steady_clock::now();
+            if (screen) screen->PostEvent(ftxui::Event::Custom);
+            return;
+        }
 
-    std::string authHeader = "Basic " + base64_encode("riot:" + lock.password);
+        std::string authHeader = "Basic " + base64_encode("riot:" + lock.password);
 
-    // Refresh conversation IDs if empty
-    if (g_chatCurrentCoreCid.empty() || (targetChannel == "all" && g_chatCurrentAllCid.empty())) {
+        // Discover active match team and all chat CIDs from conversations
         auto convRes = httpRequest("GET", "127.0.0.1", lock.port, "/chat/v6/conversations", {{"Authorization", authHeader}}, "", true, true);
         if (convRes.statusCode != 200) {
             convRes = httpRequest("GET", "127.0.0.1", lock.port, "/chat/v5/conversations", {{"Authorization", authHeader}}, "", true, true);
@@ -3106,77 +3112,113 @@ static void sendValorantChatMessage(const std::string& rawText, const std::strin
                     std::string cid = getJsonKeyStr(cItem, {"cid", "id"});
                     std::string cType = getJsonKeyStr(cItem, {"type"});
                     if (!cid.empty()) {
-                        if (cType == "all" || cid.find("-all") != std::string::npos) {
-                            g_chatCurrentAllCid = cid;
-                        } else if (g_chatCurrentCoreCid.empty()) {
-                            g_chatCurrentCoreCid = cid;
+                        if (cid.find("@ares-coregame") != std::string::npos || cid.find("@ares-pregame") != std::string::npos) {
+                            if (cid.find("-all") != std::string::npos || cType == "all") {
+                                g_chatCurrentAllCid = cid;
+                            } else {
+                                g_chatCurrentCoreCid = cid;
+                            }
                         }
                     }
                 }
             } catch (...) {}
         }
-    }
 
-    std::string targetCid = (targetChannel == "all" && !g_chatCurrentAllCid.empty()) ? g_chatCurrentAllCid : g_chatCurrentCoreCid;
-    if (targetCid.empty()) {
-        std::lock_guard<std::mutex> lk(g_chatMutex);
-        for (auto it = g_chatMessages.rbegin(); it != g_chatMessages.rend(); ++it) {
-            if (!it->cid.empty()) {
-                targetCid = it->cid;
-                break;
+        // Construct CID directly from live matchId if in match
+        if (!state.matchId.empty()) {
+            if (state.phase == "coregame") {
+                if (g_chatCurrentCoreCid.empty()) {
+                    g_chatCurrentCoreCid = state.matchId + "@ares-coregame.valorant.riotgames.com";
+                }
+                if (g_chatCurrentAllCid.empty()) {
+                    g_chatCurrentAllCid = state.matchId + "-all@ares-coregame.valorant.riotgames.com";
+                }
+            } else if (state.phase == "pregame") {
+                if (g_chatCurrentCoreCid.empty()) {
+                    g_chatCurrentCoreCid = state.matchId + "@ares-pregame.valorant.riotgames.com";
+                }
             }
         }
-    }
 
-    if (targetCid.empty()) {
-        g_chatStatusMessage = "Ошибка: активный чат не найден (вы не в матче или нет сообщений)";
+        std::string targetCid = "";
+        if (targetChannel == "all") {
+            targetCid = g_chatCurrentAllCid;
+            if (targetCid.empty() && !state.matchId.empty()) {
+                targetCid = state.matchId + "-all@ares-coregame.valorant.riotgames.com";
+            }
+        } else {
+            // targetChannel == "team"
+            targetCid = g_chatCurrentCoreCid;
+            if (targetCid.empty() && !state.matchId.empty()) {
+                if (state.phase == "coregame") {
+                    targetCid = state.matchId + "@ares-coregame.valorant.riotgames.com";
+                } else if (state.phase == "pregame") {
+                    targetCid = state.matchId + "@ares-pregame.valorant.riotgames.com";
+                }
+            }
+        }
+
+        if (targetCid.empty()) {
+            if (state.phase == "none" || state.matchId.empty()) {
+                g_chatStatusMessage = "Чат команды/всех доступен только в матче (сейчас вы в лобби)";
+            } else {
+                g_chatStatusMessage = "Ошибка: не найден CID чата матча";
+            }
+            g_chatStatusTime = std::chrono::steady_clock::now();
+            if (screen) screen->PostEvent(ftxui::Event::Custom);
+            return;
+        }
+
+        std::string sentChannel = targetChannel;
+        std::thread([lock, authHeader, targetCid, textToSend, sentChannel, screen]() {
+            try {
+                json postPayload = {
+                    {"cid", targetCid},
+                    {"message", textToSend}
+                };
+                std::string body = postPayload.dump();
+                auto res = httpRequest("POST", "127.0.0.1", lock.port, "/chat/v6/messages", {{"Authorization", authHeader}, {"Content-Type", "application/json"}}, body, true, true);
+                if (res.statusCode != 200 && res.statusCode != 201) {
+                    res = httpRequest("POST", "127.0.0.1", lock.port, "/chat/v5/messages", {{"Authorization", authHeader}, {"Content-Type", "application/json"}}, body, true, true);
+                }
+
+                if (res.statusCode == 200 || res.statusCode == 201) {
+                    g_chatStatusMessage = "Отправлено в " + (sentChannel == "all" ? std::string("[ВСЕМ]") : std::string("[КОМАНДЕ]")) + ": " + textToSend;
+                    g_chatStatusTime = std::chrono::steady_clock::now();
+
+                    ValorantChatMessage vcm;
+                    vcm.id = "local_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+                    vcm.cid = targetCid;
+                    vcm.senderName = "ВЫ";
+                    vcm.text = textToSend;
+                    vcm.chatType = sentChannel;
+                    vcm.isEnemy = false;
+                    {
+                        std::lock_guard<std::mutex> lk(g_chatMutex);
+                        g_chatMessages.push_back(vcm);
+                        if (g_chatMessages.size() > 200) {
+                            g_chatMessages.erase(g_chatMessages.begin(), g_chatMessages.begin() + (g_chatMessages.size() - 200));
+                        }
+                    }
+                } else {
+                    g_chatStatusMessage = "Ошибка отправки (HTTP " + std::to_string(res.statusCode) + ")";
+                    g_chatStatusTime = std::chrono::steady_clock::now();
+                }
+            } catch (...) {
+                g_chatStatusMessage = "Исключение при отправке в чат";
+                g_chatStatusTime = std::chrono::steady_clock::now();
+            }
+            if (screen) screen->PostEvent(ftxui::Event::Custom);
+        }).detach();
+    } catch (const std::exception& e) {
+        g_chatStatusMessage = std::string("Ошибка: ") + e.what();
         g_chatStatusTime = std::chrono::steady_clock::now();
         if (screen) screen->PostEvent(ftxui::Event::Custom);
-        return;
-    }
-
-    std::string sentChannel = targetChannel;
-    std::thread([lock, authHeader, targetCid, textToSend, sentChannel, screen]() {
-        try {
-            // Note: omitting type lets Riot Client automatically infer the room/conversation type
-            json postPayload = {
-                {"cid", targetCid},
-                {"message", textToSend}
-            };
-            std::string body = postPayload.dump();
-            auto res = httpRequest("POST", "127.0.0.1", lock.port, "/chat/v6/messages", {{"Authorization", authHeader}, {"Content-Type", "application/json"}}, body, true, true);
-            if (res.statusCode != 200 && res.statusCode != 201) {
-                res = httpRequest("POST", "127.0.0.1", lock.port, "/chat/v5/messages", {{"Authorization", authHeader}, {"Content-Type", "application/json"}}, body, true, true);
-            }
-
-            if (res.statusCode == 200 || res.statusCode == 201) {
-                g_chatStatusMessage = "Отправлено в " + (sentChannel == "all" ? std::string("[ВСЕМ]") : std::string("[КОМАНДЕ]")) + ": " + textToSend;
-                g_chatStatusTime = std::chrono::steady_clock::now();
-
-                ValorantChatMessage vcm;
-                vcm.id = "local_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-                vcm.cid = targetCid;
-                vcm.senderName = "ВЫ";
-                vcm.text = textToSend;
-                vcm.chatType = sentChannel;
-                vcm.isEnemy = false;
-                {
-                    std::lock_guard<std::mutex> lk(g_chatMutex);
-                    g_chatMessages.push_back(vcm);
-                    if (g_chatMessages.size() > 200) {
-                        g_chatMessages.erase(g_chatMessages.begin(), g_chatMessages.begin() + (g_chatMessages.size() - 200));
-                    }
-                }
-            } else {
-                g_chatStatusMessage = "Ошибка отправки (HTTP " + std::to_string(res.statusCode) + ")";
-                g_chatStatusTime = std::chrono::steady_clock::now();
-            }
-        } catch (...) {
-            g_chatStatusMessage = "Исключение при отправке в чат";
-            g_chatStatusTime = std::chrono::steady_clock::now();
-        }
+    } catch (...) {
+        g_chatStatusMessage = "Неизвестная ошибка отправки";
+        g_chatStatusTime = std::chrono::steady_clock::now();
         if (screen) screen->PostEvent(ftxui::Event::Custom);
-    }).detach();
+    }
 }
 
 static HWND getTopLevelConsoleWindow() {
@@ -3418,7 +3460,7 @@ int main() {
             auto now = std::chrono::steady_clock::now();
             int pollInterval = 4;
             {
-                std::lock_guard<std::mutex> lk(g_mutex);
+                std::lock_guard<std::recursive_mutex> lk(g_mutex);
                 currentPhase = matchState.phase;
             }
             if (currentPhase == "coregame") pollInterval = 5;
@@ -3446,7 +3488,7 @@ int main() {
                             s_ownedChecked = true;
                             std::thread([newSession]() {
                                 auto owned = getOwnedAgents(newSession);
-                                std::lock_guard<std::mutex> lk(g_mutex);
+                                std::lock_guard<std::recursive_mutex> lk(g_mutex);
                                 g_ownedAgents = owned;
                             }).detach();
                         }
@@ -3495,7 +3537,7 @@ int main() {
                 }
                 
                 {
-                    std::lock_guard<std::mutex> lk(g_mutex);
+                    std::lock_guard<std::recursive_mutex> lk(g_mutex);
                     lock = newLock;
                     session = newSession;
                     g_liveLock = newLock;
@@ -3548,7 +3590,7 @@ int main() {
                                             pmi.movement = getJsonKeyStr(m, {"CompetitiveMovement"});
                                             
                                             {
-                                                std::lock_guard<std::mutex> lk(g_mutex);
+                                                std::lock_guard<std::recursive_mutex> lk(g_mutex);
                                                 g_postMatchInfo = pmi;
                                                 g_postMatchStartTime = std::chrono::steady_clock::now();
                                                 g_showPostMatch = true;
@@ -3619,7 +3661,7 @@ int main() {
                 
                 // Keep selectedPlayerInfo updated if viewing it
                 if (g_currentView == AppView::PLAYER_STATS && !g_selectedPuuid.empty()) {
-                    std::lock_guard<std::mutex> lk(g_mutex);
+                    std::lock_guard<std::recursive_mutex> lk(g_mutex);
                     for (const auto& p : matchState.players) {
                         if (p.puuid == g_selectedPuuid) {
                             g_selectedPlayerInfo = p;
@@ -3710,7 +3752,7 @@ int main() {
 
             // Sync players with latest background cached stats, loadouts, and detected parties
             {
-                std::lock_guard<std::mutex> lk(g_mutex);
+                std::lock_guard<std::recursive_mutex> lk(g_mutex);
                 for (auto& p : matchState.players) {
                     if (g_nameCache.count(p.puuid)) {
                         p.gameName = g_nameCache[p.puuid].first;
@@ -3830,7 +3872,7 @@ int main() {
             Lockfile safeLock;
             std::set<std::string> safeOwnedAgents;
             {
-                std::lock_guard<std::mutex> lk(g_mutex);
+                std::lock_guard<std::recursive_mutex> lk(g_mutex);
                 safeMatchState = matchState;
                 safeSession = session;
                 safeLock = lock;
@@ -3918,7 +3960,7 @@ int main() {
 
     // Catch events for clicks and quitting
     renderer = ftxui::CatchEvent(renderer, [&](ftxui::Event event) {
-        std::lock_guard<std::mutex> lk(g_mutex);
+        std::lock_guard<std::recursive_mutex> lk(g_mutex);
 
         // Block Ctrl+C from closing app
         if (event == ftxui::Event::Special("\x03") || (event.is_character() && event.character() == "\x03")) {
@@ -4216,7 +4258,7 @@ int main() {
                             std::string err;
                             bool ok = lockInAgent(sess, mId, agentId, err);
                             {
-                                std::lock_guard<std::mutex> lk(g_mutex);
+                                std::lock_guard<std::recursive_mutex> lk(g_mutex);
                                 g_isLockingAgent = false;
                                 if (ok) {
                                     g_pickStatusMsg = "[OK] УСПЕШНО ЗАБЛОКИРОВАН: " + curAgentName + "!";
@@ -4228,7 +4270,7 @@ int main() {
                             if (ok) {
                                 std::this_thread::sleep_for(std::chrono::milliseconds(900));
                                 {
-                                    std::lock_guard<std::mutex> lk(g_mutex);
+                                    std::lock_guard<std::recursive_mutex> lk(g_mutex);
                                     g_currentView = AppView::MAIN;
                                 }
                                 screen.PostEvent(ftxui::Event::Custom);
@@ -4309,7 +4351,7 @@ int main() {
                             std::string msg;
                             bool ok = sendPlayerReport(sess, lkFile, mId, puuid, agName, msg);
                             {
-                                std::lock_guard<std::mutex> lk(g_mutex);
+                                std::lock_guard<std::recursive_mutex> lk(g_mutex);
                                 g_reportStatusMsg = msg;
                                 if (ok) {
                                     g_reportedPuuids.insert(puuid);
