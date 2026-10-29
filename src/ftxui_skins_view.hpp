@@ -318,7 +318,7 @@ inline ftxui::Element renderSkinDetailModal(const WeaponSkinInfo& w) {
         hbox(Elements{
             text(" 🔍 ПОЛНОЕ НАЗВАНИЕ СКИНА ") | bold | color(Color::YellowLight),
             filler(),
-            text("[ ESC / Клик — закрыть ]") | color(Color::GrayLight)
+            text("[ ESC / Клик — закрыть ] ") | color(Color::GrayLight)
         }),
         separator(),
         text(""),
@@ -339,7 +339,7 @@ inline ftxui::Element renderSkinDetailModal(const WeaponSkinInfo& w) {
         text(""),
         hbox(Elements{
             text("  ▸ Полное имя: ") | bold | color(Color::GrayLight),
-            text(fullTitle) | bold | color(Color::YellowLight)
+            paragraph(fullTitle) | bold | color(Color::YellowLight)
         }),
         text(""),
         separator(),
@@ -347,9 +347,13 @@ inline ftxui::Element renderSkinDetailModal(const WeaponSkinInfo& w) {
         closeBtn | center,
         text("")
     })
+    | bgcolor(Color::Black)
+    | clear_under
     | borderStyled(ftxui::DOUBLE, Color::Cyan)
-    | bgcolor(Color::RGB(12, 16, 24))
-    | size(WIDTH, EQUAL, 66)
+    | bgcolor(Color::Black)
+    | clear_under
+    | size(WIDTH, GREATER_THAN, 68)
+    | size(WIDTH, LESS_THAN, 84)
     | reflect(g_skinModalBox);
 
     return vbox(Elements{
