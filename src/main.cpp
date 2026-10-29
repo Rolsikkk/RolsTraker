@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.2.6";
+const std::string CURRENT_VERSION = "v3.2.7";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -1678,7 +1678,12 @@ void fetchPlayerStats(const Session& session, const std::string& puuid, const st
             {"X-Riot-ClientVersion", session.clientVersion}
         };
 
-        auto histRes = httpRequest("GET", session.pdHost, 443, "/match-history/v1/history/" + puuid + "?startIndex=0&endIndex=5", pdHeaders, "", true, false);
+        std::string histPath = "/match-history/v1/history/" + puuid + "?startIndex=0&endIndex=20&queue=competitive";
+        auto histRes = httpRequest("GET", session.pdHost, 443, histPath, pdHeaders, "", true, false);
+        if (histRes.statusCode != 200 || histRes.body.find("\"History\":[]") != std::string::npos) {
+            histPath = "/match-history/v1/history/" + puuid + "?startIndex=0&endIndex=20";
+            histRes = httpRequest("GET", session.pdHost, 443, histPath, pdHeaders, "", true, false);
+        }
         if (histRes.statusCode == 200) {
             try {
                 auto histJ = json::parse(histRes.body);
@@ -1784,8 +1789,22 @@ void fetchPlayerStats(const Session& session, const std::string& puuid, const st
                         stats.legshots = totLs;
                         int totalShots = totHs + totBs + totLs;
                         stats.hsPercent = (totalShots > 0) ? ((float)totHs * 100.0f / (float)totalShots) : 0.0f;
-                        stats.matchesWon = totWon;
-                        stats.matchesPlayed = totPlayed;
+                        int seasonGames = 0;
+                        int seasonWins = 0;
+                        {
+                            std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                            if (g_rankCache.count(puuid)) {
+                                seasonWins = g_rankCache[puuid].wins;
+                                seasonGames = g_rankCache[puuid].wins + g_rankCache[puuid].losses;
+                            }
+                        }
+                        if (seasonGames > 0) {
+                            stats.matchesPlayed = seasonGames;
+                            stats.matchesWon = seasonWins;
+                        } else {
+                            stats.matchesWon = totWon;
+                            stats.matchesPlayed = totPlayed;
+                        }
                         stats.acs = (totRounds > 0) ? (totScore / totRounds) : 0;
                         stats.hasData = true;
                         stats.source = "Riot Games";
@@ -2017,6 +2036,28 @@ void resolveDisplayNamesAndRanks(const Session& session, std::vector<PlayerInfo>
                                             if (r > peakRR) peakRR = r;
                                         }
                                     }
+                                    if (sData.contains("Rank") && sData["Rank"].is_number()) {
+                                        int rk = sData["Rank"].get<int>();
+                                        if (rk > peakTier) {
+                                            peakTier = rk;
+                                            peakRR = 0;
+                                        }
+                                    }
+                                    if (sData.contains("WinsByTier") && sData["WinsByTier"].is_object()) {
+                                        for (const auto& [tStr, wCount] : sData["WinsByTier"].items()) {
+                                            try {
+                                                int t = std::stoi(tStr);
+                                                if (t > peakTier) {
+                                                    peakTier = t;
+                                                    peakRR = 0;
+                                                }
+                                            } catch (...) {}
+                                        }
+                                    }
+                                }
+                                if (tier > peakTier) {
+                                    peakTier = tier;
+                                    peakRR = rr;
                                 }
                             }
                         }
@@ -3833,6 +3874,10 @@ int main() {
                                                 g_postMatchInfo = pmi;
                                                 g_postMatchStartTime = std::chrono::steady_clock::now();
                                                 g_showPostMatch = true;
+                                                if (g_rankCache.count(session.puuid)) {
+                                                    g_rankCache[session.puuid].rr = pmi.rrAfter;
+                                                    if (pmi.tierAfter > 0) g_rankCache[session.puuid].tier = pmi.tierAfter;
+                                                }
                                             }
                                             break;
                                         }
@@ -4400,6 +4445,96 @@ int main() {
                             g_selectedPlayerInfo.peakRankTier = g_rankCache[session.puuid].peakTier;
                             g_selectedPlayerInfo.peakRankRR = g_rankCache[session.puuid].peakRR;
                         }
+                    }
+
+                    // Always refresh MMR for local player so current RR and Peak rank are up-to-date
+                    {
+                        Session pSession = session;
+                        std::string pPuuid = session.puuid;
+                        std::thread([pSession, pPuuid]() {
+                            std::string clientPlatform = getClientPlatformBase64();
+                            std::map<std::string, std::string> pdHeaders = {
+                                {"Authorization", "Bearer " + pSession.accessToken},
+                                {"X-Riot-Entitlements-JWT", pSession.token},
+                                {"X-Riot-ClientPlatform", clientPlatform},
+                                {"X-Riot-ClientVersion", pSession.clientVersion}
+                            };
+                            auto mmrRes = httpRequest("GET", pSession.pdHost, 443, "/mmr/v1/players/" + pPuuid, pdHeaders, "", true, false);
+                            if (mmrRes.statusCode == 200) {
+                                try {
+                                    auto j = json::parse(mmrRes.body);
+                                    int tier = 0, rr = 0, totalWins = 0, totalGames = 0, peakTier = 0, peakRR = 0;
+                                    if (j.contains("LatestCompetitiveUpdate") && !j["LatestCompetitiveUpdate"].is_null()) {
+                                        auto lcu = j["LatestCompetitiveUpdate"];
+                                        if (lcu.contains("TierAfterUpdate") && !lcu["TierAfterUpdate"].is_null()) tier = lcu["TierAfterUpdate"].get<int>();
+                                        if (lcu.contains("RankedRatingAfterUpdate") && !lcu["RankedRatingAfterUpdate"].is_null()) rr = lcu["RankedRatingAfterUpdate"].get<int>();
+                                    }
+                                    if (j.contains("QueueSkills") && j["QueueSkills"].contains("competitive")) {
+                                        auto comp = j["QueueSkills"]["competitive"];
+                                        std::string latestSeasonId;
+                                        if (j.contains("LatestCompetitiveUpdate") && !j["LatestCompetitiveUpdate"].is_null()) {
+                                            latestSeasonId = getJsonKeyStr(j["LatestCompetitiveUpdate"], {"SeasonID"});
+                                        }
+                                        if (comp.contains("SeasonalInfoBySeasonID") && comp["SeasonalInfoBySeasonID"].is_object()) {
+                                            auto seasons = comp["SeasonalInfoBySeasonID"];
+                                            if (!latestSeasonId.empty() && seasons.contains(latestSeasonId)) {
+                                                auto sData = seasons[latestSeasonId];
+                                                if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
+                                                    int t = sData["CompetitiveTier"].get<int>();
+                                                    if (t > 0) {
+                                                        tier = t;
+                                                        if (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) rr = sData["RankedRating"].get<int>();
+                                                    }
+                                                }
+                                                if (sData.contains("NumberOfGames") && sData["NumberOfGames"].is_number()) totalGames = sData["NumberOfGames"].get<int>();
+                                                if (sData.contains("NumberOfWinsWithPlacements") && sData["NumberOfWinsWithPlacements"].is_number()) totalWins = sData["NumberOfWinsWithPlacements"].get<int>();
+                                            }
+                                            for (const auto& [sId, sData] : seasons.items()) {
+                                                if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
+                                                    int t = sData["CompetitiveTier"].get<int>();
+                                                    if (t > peakTier) {
+                                                        peakTier = t;
+                                                        peakRR = (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) ? sData["RankedRating"].get<int>() : 0;
+                                                    } else if (t == peakTier) {
+                                                        int r = (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) ? sData["RankedRating"].get<int>() : 0;
+                                                        if (r > peakRR) peakRR = r;
+                                                    }
+                                                }
+                                                if (sData.contains("Rank") && sData["Rank"].is_number()) {
+                                                    int rk = sData["Rank"].get<int>();
+                                                    if (rk > peakTier) { peakTier = rk; peakRR = 0; }
+                                                }
+                                                if (sData.contains("WinsByTier") && sData["WinsByTier"].is_object()) {
+                                                    for (const auto& [tStr, wCount] : sData["WinsByTier"].items()) {
+                                                        try {
+                                                            int t = std::stoi(tStr);
+                                                            if (t > peakTier) { peakTier = t; peakRR = 0; }
+                                                        } catch (...) {}
+                                                    }
+                                                }
+                                            }
+                                            if (tier > peakTier) { peakTier = tier; peakRR = rr; }
+                                        }
+                                    }
+                                    {
+                                        std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                                        g_rankCache[pPuuid] = {tier, rr, totalWins, std::max(0, totalGames - totalWins), peakTier, peakRR};
+                                        if (g_selectedPuuid == pPuuid) {
+                                            g_selectedPlayerInfo.rankTier = tier;
+                                            g_selectedPlayerInfo.rankRR = rr;
+                                            g_selectedPlayerInfo.wins = totalWins;
+                                            g_selectedPlayerInfo.losses = std::max(0, totalGames - totalWins);
+                                            g_selectedPlayerInfo.peakRankTier = peakTier;
+                                            g_selectedPlayerInfo.peakRankRR = peakRR;
+                                        }
+                                    }
+                                } catch (...) {}
+                            }
+                        }).detach();
+                    }
+
+                    if (g_statsCache.count(session.puuid) && g_statsCache[session.puuid].matchesPlayed <= 5) {
+                        g_statsCache.erase(session.puuid);
                     }
 
                     if (!g_statsCache.count(session.puuid) && !g_statsFetching.count(session.puuid)) {

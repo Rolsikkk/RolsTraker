@@ -94,7 +94,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         badgeText = " [ ПРОФИЛЬ ЗАКРЫТ НА TRACKER.GG ] ";
         badgeColor = Color::YellowLight;
     } else if (g_selectedPlayerInfo.statsSource == "Riot Games") {
-        badgeText = " [ ДАННЫЕ: RIOT MATCH HISTORY ] ";
+        badgeText = " [ ДАННЫЕ: RIOT COMPETITIVE & MATCH HISTORY ] ";
         badgeColor = Color::GreenLight;
     }
     auto trackerBadge = text(badgeText) | bold | color(badgeColor) | border;

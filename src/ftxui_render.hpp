@@ -503,7 +503,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         
         auto updateElem = buildUpdateElement(updateStatus);
 
-        auto myStatsBtn = renderButton("Моя статистика (Tracker.gg)", g_myStatsBox, ftxui::Color::CyanLight, "my_stats", g_mousePressed)
+        auto myStatsBtn = renderButton("Моя статистика", g_myStatsBox, ftxui::Color::CyanLight, "my_stats", g_mousePressed)
                         | ftxui::reflect(g_myStatsBox);
 
         auto updateBanner = g_updateInfo.available ? ftxui::vbox({
