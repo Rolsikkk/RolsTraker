@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.3.3";
+const std::string CURRENT_VERSION = "v3.3.4";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -87,6 +87,7 @@ struct UpdateInfo {
     std::string downloadUrl;
     bool isDownloading = false;
     std::string statusText;
+    int downloadPercent = -1;
 };
 #endif
 
@@ -422,7 +423,7 @@ HttpResponse httpRequest(
     return response;
 }
 
-bool downloadFileWithRedirects(const std::string& initialUrl, const std::string& outputPath, const std::string& authToken = "") {
+bool downloadFileWithRedirects(const std::string& initialUrl, const std::string& outputPath, const std::string& authToken = "", std::function<void(int percent, size_t downloaded, size_t total)> progressCallback = nullptr) {
     std::string currentUrl = initialUrl;
     for (int redirectCount = 0; redirectCount < 5; redirectCount++) {
         std::string host, path;
@@ -501,6 +502,10 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
         }
 
         if (dwStatusCode == 200) {
+            DWORD contentLength = 0;
+            DWORD dwLenSize = sizeof(contentLength);
+            bool hasContentLength = WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &contentLength, &dwLenSize, WINHTTP_NO_HEADER_INDEX);
+
             std::ofstream outFile(outputPath, std::ios::binary);
             if (!outFile.is_open()) {
                 WinHttpCloseHandle(hRequest);
@@ -510,17 +515,32 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
             }
 
             DWORD dwDownloaded = 0;
+            DWORD totalDownloaded = 0;
+            int lastPercent = -1;
+
             while (WinHttpQueryDataAvailable(hRequest, &dwSize) && dwSize > 0) {
                 std::vector<char> buffer(dwSize);
                 if (!WinHttpReadData(hRequest, (LPVOID)buffer.data(), dwSize, &dwDownloaded) || dwDownloaded == 0) break;
                 outFile.write(buffer.data(), dwDownloaded);
+                totalDownloaded += dwDownloaded;
+
+                if (hasContentLength && contentLength > 0) {
+                    int percent = (int)((totalDownloaded * 100ULL) / contentLength);
+                    if (percent > 100) percent = 100;
+                    if (percent != lastPercent) {
+                        lastPercent = percent;
+                        if (progressCallback) progressCallback(percent, totalDownloaded, contentLength);
+                    }
+                } else {
+                    if (progressCallback) progressCallback(-1, totalDownloaded, 0);
+                }
             }
 
             outFile.close();
             WinHttpCloseHandle(hRequest);
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
-            return true;
+            return (totalDownloaded > 0);
         }
 
         WinHttpCloseHandle(hRequest);
@@ -602,7 +622,8 @@ void startUpdateDownload() {
         std::lock_guard<std::mutex> lk(g_updateMutex);
         if (g_updateInfo.isDownloading || g_updateInfo.downloadUrl.empty()) return;
         g_updateInfo.isDownloading = true;
-        g_updateInfo.statusText = "Скачивание обновления " + g_updateInfo.latestVersion + "...";
+        g_updateInfo.downloadPercent = 0;
+        g_updateInfo.statusText = "Подготовка: 0%";
     }
 
     std::thread([]() {
@@ -620,8 +641,25 @@ void startUpdateDownload() {
         std::string newExePath = std::string(currentExePath) + ".new";
         std::string oldExePath = std::string(currentExePath) + ".old";
 
+        auto progressCb = [](int percent, size_t downloaded, size_t total) {
+            std::lock_guard<std::mutex> lk(g_updateMutex);
+            g_updateInfo.downloadPercent = percent;
+            if (percent >= 0 && total > 0) {
+                double curMB = (double)downloaded / (1024.0 * 1024.0);
+                double totMB = (double)total / (1024.0 * 1024.0);
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Скачивание: %d%% (%.1f / %.1f МБ)", percent, curMB, totMB);
+                g_updateInfo.statusText = buf;
+            } else {
+                double curMB = (double)downloaded / (1024.0 * 1024.0);
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Скачано: %.1f МБ...", curMB);
+                g_updateInfo.statusText = buf;
+            }
+        };
+
         std::string token = getGitHubAuthToken();
-        if (downloadFileWithRedirects(downloadUrl, newExePath, token)) {
+        if (downloadFileWithRedirects(downloadUrl, newExePath, token, progressCb)) {
             {
                 std::lock_guard<std::mutex> lk(g_updateMutex);
                 g_updateInfo.statusText = "Установка и перезапуск...";

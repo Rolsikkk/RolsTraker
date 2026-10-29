@@ -37,6 +37,7 @@ struct UpdateInfo {
     std::string downloadUrl;
     bool isDownloading = false;
     std::string statusText;
+    int downloadPercent = -1;
 };
 #endif
 
@@ -473,14 +474,23 @@ inline ftxui::Element renderUpdateModal() {
     if (info.isDownloading) {
         static auto start_time_spin = std::chrono::steady_clock::now();
         int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_spin).count() / 100;
+        std::string label = info.statusText.empty() ? "Скачивание обновления..." : info.statusText;
+        float frac = (info.downloadPercent >= 0 && info.downloadPercent <= 100) ? ((float)info.downloadPercent / 100.0f) : 0.0f;
         actionArea = ftxui::vbox({
             ftxui::text(""),
             ftxui::hbox({
                 ftxui::filler(),
                 circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan),
-                ftxui::text("  " + (info.statusText.empty() ? "Скачивание обновления..." : info.statusText)) | ftxui::bold | ftxui::color(ftxui::Color::YellowLight),
+                ftxui::text("  " + label) | ftxui::bold | ftxui::color(ftxui::Color::YellowLight),
                 ftxui::filler()
             }),
+            ftxui::text(""),
+            (info.downloadPercent >= 0 ? ftxui::hbox({
+                ftxui::filler(),
+                ftxui::gauge(frac) | ftxui::color(ftxui::Color::Cyan) | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 34),
+                ftxui::text(" " + std::to_string(info.downloadPercent) + "%") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight),
+                ftxui::filler()
+            }) : ftxui::text("")),
             ftxui::text("")
         });
     } else {
