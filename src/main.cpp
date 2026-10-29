@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.2.7";
+const std::string CURRENT_VERSION = "v3.2.8";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -330,7 +330,7 @@ HttpResponse httpRequest(
             if (g_hSession) {
                 DWORD dwProtocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | 0x00000800; // TLS 1.2 + TLS 1.3
                 WinHttpSetOption(g_hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &dwProtocols, sizeof(dwProtocols));
-                WinHttpSetTimeouts(g_hSession, 4000, 4000, 8000, 8000);
+                WinHttpSetTimeouts(g_hSession, 2000, 2000, 3000, 3000);
             }
         }
     }
@@ -3725,6 +3725,15 @@ int main() {
         }
     }
     Log("FTXUI screen created");
+
+    // Dedicated UI Ticker thread (30 FPS constant) - ensures zero lag and smooth animations
+    std::thread ui_anim_thread([&screen]() {
+        while (g_running) {
+            screen.PostEvent(ftxui::Event::Custom);
+            std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        }
+    });
+    ui_anim_thread.detach();
     
     // Background polling thread
     Log("Starting polling thread");
@@ -3753,10 +3762,27 @@ int main() {
                 lastCheck = now;
                 if (loopCount <= 5) Log("poll: readLockfile");
                 Lockfile newLock = readLockfile();
-                Session newSession;
+                static int s_consecutiveLockFails = 0;
+                if (newLock.port == 0) {
+                    s_consecutiveLockFails++;
+                    if (s_consecutiveLockFails < 4 && lock.port != 0) {
+                        newLock = lock;
+                    }
+                } else {
+                    s_consecutiveLockFails = 0;
+                }
+
+                Session newSession = session;
                 MatchState newState;
                 if (loopCount <= 5) Log("poll: lockfile port=" + std::to_string(newLock.port));
                 if (newLock.port != 0) {
+                    // Immediately update lock so UI knows Riot Client is active without waiting for network calls
+                    {
+                        std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                        lock = newLock;
+                        g_liveLock = newLock;
+                    }
+
                     if (loopCount <= 5) Log("poll: getSession");
                     newSession = getSession(newLock);
                     g_localPuuid = newSession.puuid;
@@ -4133,12 +4159,7 @@ int main() {
                 g_liveMatchState.players = matchState.players;
             }
             
-            screen.PostEvent(ftxui::Event::Custom);
-            if (g_showPostMatch) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(30));
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
             } catch (const std::exception& e) {
                 Log(std::string("Polling thread error: ") + e.what());
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
