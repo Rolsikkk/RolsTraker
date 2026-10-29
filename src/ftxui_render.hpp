@@ -573,6 +573,19 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::text("")
         }) : ftxui::text("");
 
+        int myTier = 0, myRR = 0, myPeakTier = 0, myPeakRR = 0;
+        if (!session.puuid.empty()) {
+            std::lock_guard<std::recursive_mutex> lk(g_mutex);
+            if (g_rankCache.count(session.puuid)) {
+                const auto& rk = g_rankCache[session.puuid];
+                myTier = rk.tier;
+                myRR = rk.rr;
+                myPeakTier = rk.peakTier;
+                myPeakRR = rk.peakRR;
+            }
+        }
+        auto myMmrBadge = renderMyMMRBadge(myTier, myRR, myPeakTier, myPeakRR, 0);
+
         return ftxui::vbox({
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
@@ -584,6 +597,8 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::hbox({
                 myStatsBtn
             }) | ftxui::center,
+            ftxui::text(""),
+            myMmrBadge,
             ftxui::text(""),
             ftxui::text(" [F11 / M] Развернуть на весь экран | [Q] Выход ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
             ftxui::filler(),

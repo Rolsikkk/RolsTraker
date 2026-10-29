@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.3.1";
+const std::string CURRENT_VERSION = "v3.3.2";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -3645,7 +3645,7 @@ int main() {
     std::set_terminate(logTerminateHandler);
     loadSettings();
     Log("Settings loaded");
-    if (!g_discordClientId.empty()) { initDiscordRpc(g_discordClientId); Log("Discord RPC init done"); }
+    if (!g_discordClientId.empty()) { initDiscordRpc(g_discordClientId); updateDiscordPresence("В приложении", "RolsTracker"); Log("Discord RPC init done"); }
     
     // Set optimal vertical / portrait window size (1080x1920 screen or primary monitor)
     HWND console = getTopLevelConsoleWindow();
@@ -3793,6 +3793,11 @@ int main() {
                 static int s_consecutiveLockFails = 0;
                 if (newLock.port == 0) {
                     s_consecutiveLockFails++;
+                    static auto s_lastOfflineRpc = std::chrono::steady_clock::now() - std::chrono::seconds(30);
+                    if (std::chrono::duration_cast<std::chrono::seconds>(now - s_lastOfflineRpc).count() >= 5) {
+                        s_lastOfflineRpc = now;
+                        if (!g_discordClientId.empty()) updateDiscordPresence("В приложении", "RolsTracker");
+                    }
                     if (s_consecutiveLockFails < 4 && lock.port != 0) {
                         newLock = lock;
                     }
@@ -3899,9 +3904,12 @@ int main() {
                             resolveOwnParty(newSession, newState.players);
                             
                             if (!g_discordClientId.empty()) {
-                                std::string dState = newState.phase == "coregame" ? "In Game" : "Agent Select";
-                                std::string dDetails = "Map: " + (g_globalMapNameMap.count(newState.mapId) ? g_globalMapNameMap[newState.mapId] : newState.mapId);
-                                updateDiscordPresence(dState, dDetails);
+                                std::string mapName = g_globalMapNameMap.count(newState.mapId) ? g_globalMapNameMap[newState.mapId] : (!newState.mapId.empty() ? newState.mapId : "");
+                                if (newState.phase == "coregame") {
+                                    updateDiscordPresence("В матче", mapName.empty() ? "RolsTracker" : ("Карта: " + mapName));
+                                } else {
+                                    updateDiscordPresence("Выбор агента", mapName.empty() ? "RolsTracker" : ("Карта: " + mapName));
+                                }
                             }
                             if (loopCount <= 5) Log("poll: getPresencesPartyMap");
                             auto presencePartyMap = getPresencesPartyMap(newLock);
@@ -3929,6 +3937,25 @@ int main() {
                             if (!newSession.puuid.empty()) {
                                 fetchPlayerLoadoutDirect(newSession, newSession.puuid);
                                 fetchChatMessages(newLock, newState, g_globalAgentMap, g_localPuuid);
+                            }
+                            if (!g_discordClientId.empty()) {
+                                static auto s_lastIdleRpc = std::chrono::steady_clock::now() - std::chrono::seconds(30);
+                                if (std::chrono::duration_cast<std::chrono::seconds>(now - s_lastIdleRpc).count() >= 5) {
+                                    s_lastIdleRpc = now;
+                                    std::string myRankInfo = "";
+                                    if (!newSession.puuid.empty()) {
+                                        std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                                        if (g_rankCache.count(newSession.puuid)) {
+                                            int t = g_rankCache[newSession.puuid].tier;
+                                            int r = g_rankCache[newSession.puuid].rr;
+                                            if (t >= 3) {
+                                                int elo = (t - 2) * 100 + r;
+                                                myRankInfo = " • " + std::to_string(elo) + " ELO";
+                                            }
+                                        }
+                                    }
+                                    updateDiscordPresence("В главном меню" + myRankInfo, "RolsTracker");
+                                }
                             }
                         }
                     }
