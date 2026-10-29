@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.2.0";
+const std::string CURRENT_VERSION = "v3.2.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -790,6 +790,10 @@ std::map<std::string, ftxui::Box> g_playerBoxes;
 ftxui::Box g_myStatsBox;
 ftxui::Box g_backButtonBox;
 ftxui::Box g_openTrackerBox;
+std::map<std::string, ftxui::Box> g_skinRowBoxes;
+std::string g_selectedSkinWeaponUuid = "";
+ftxui::Box g_skinModalCloseBox;
+ftxui::Box g_skinModalBox;
 ftxui::Box g_pickAgentBtnBox;
 ftxui::Box g_agentPickerBackBox;
 std::map<std::string, ftxui::Box> g_agentBoxes;
@@ -4431,10 +4435,28 @@ int main() {
                     }
                 }
             } else if (g_currentView == AppView::PLAYER_STATS) {
+                if (!g_selectedSkinWeaponUuid.empty()) {
+                    if (g_skinModalCloseBox.Contain(event.mouse().x, event.mouse().y) ||
+                        !g_skinModalBox.Contain(event.mouse().x, event.mouse().y)) {
+                        g_selectedSkinWeaponUuid = "";
+                        return true;
+                    }
+                    g_selectedSkinWeaponUuid = "";
+                    return true;
+                }
+                if (g_playerProfileTab == PlayerProfileTab::SKINS) {
+                    for (const auto& [wUuid, box] : g_skinRowBoxes) {
+                        if (box.Contain(event.mouse().x, event.mouse().y)) {
+                            g_selectedSkinWeaponUuid = (g_selectedSkinWeaponUuid == wUuid) ? "" : wUuid;
+                            return true;
+                        }
+                    }
+                }
                 if (g_tabSkinsBox.Contain(event.mouse().x, event.mouse().y)) {
                     g_activeButton = "tab_skins";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();
                     g_playerProfileTab = PlayerProfileTab::SKINS;
+                    g_selectedSkinWeaponUuid = "";
                     fetchPlayerLoadoutDirect(session, g_selectedPuuid);
                     return true;
                 }
@@ -4442,6 +4464,7 @@ int main() {
                     g_activeButton = "tab_stats";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();
                     g_playerProfileTab = PlayerProfileTab::STATS;
+                    g_selectedSkinWeaponUuid = "";
                     return true;
                 }
                 if (g_openTrackerBox.Contain(event.mouse().x, event.mouse().y)) {
@@ -4453,6 +4476,7 @@ int main() {
                 if (g_backButtonBox.Contain(event.mouse().x, event.mouse().y)) {
                     g_activeButton = "back";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    g_selectedSkinWeaponUuid = "";
                     g_currentView = AppView::MAIN;
                     return true;
                 }

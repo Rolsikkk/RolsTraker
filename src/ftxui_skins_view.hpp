@@ -223,11 +223,17 @@ inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Col
             dispSkin = "Стандартный " + w.weaponName;
         }
 
+        // If skin name starts with weapon name, strip it to prevent redundant repetition
+        std::string wPrefix = w.weaponName + " ";
+        if (dispSkin.rfind(wPrefix, 0) == 0) {
+            dispSkin = dispSkin.substr(wPrefix.length());
+        }
+
         std::replace(dispSkin.begin(), dispSkin.end(), '\n', ' ');
 
-        // Safe truncation based on UTF-8 code point count (not byte length)
-        if (utf8_length(dispSkin) > 22) {
-            dispSkin = utf8_substr(dispSkin, 20) + "..";
+        // Safe truncation based on UTF-8 code point count
+        if (utf8_length(dispSkin) > 28) {
+            dispSkin = utf8_substr(dispSkin, 26) + "..";
         }
 
         Element skinText = text(dispSkin) | color(skinColor);
@@ -271,17 +277,90 @@ inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Col
             });
         }
 
+        bool isSelected = (g_selectedSkinWeaponUuid == w.weaponUuid);
+        bool isHovered = g_skinRowBoxes.count(w.weaponUuid) && g_skinRowBoxes[w.weaponUuid].Contain(g_mouseX, g_mouseY);
+
         Element row = hbox({
             text(" " + w.weaponName) | color(nameColor) | bold | size(WIDTH, EQUAL, 10),
             starIcon,
             skinText,
             chromaElement,
             filler()
-        });
+        }) | reflect(g_skinRowBoxes[w.weaponUuid]);
+
+        if (isSelected) {
+            row = row | bgcolor(Color::RGB(35, 55, 80)) | bold;
+        } else if (isHovered && w.isCustom) {
+            row = row | bgcolor(Color::RGB(25, 38, 55));
+        }
+
         rows.push_back(row);
     }
 
     return vbox(std::move(rows));
+}
+
+inline ftxui::Element renderSkinDetailModal(const WeaponSkinInfo& w) {
+    using namespace ftxui;
+
+    std::string fullTitle = w.fullName;
+    if (fullTitle.empty()) fullTitle = w.weaponName;
+
+    std::string sName = w.skinName;
+    if (sName.empty() || !w.isCustom) sName = "Стандартный " + w.weaponName;
+
+    std::string cName = w.chromaName.empty() ? "Стандартная (без расцветок)" : w.chromaName;
+
+    auto closeBtn = renderButton("✕ ЗАКРЫТЬ", g_skinModalCloseBox, Color::CyanLight, "skin_modal_close", g_mousePressed)
+                  | reflect(g_skinModalCloseBox);
+
+    auto card = vbox(Elements{
+        hbox(Elements{
+            text(" 🔍 ПОЛНОЕ НАЗВАНИЕ СКИНА ") | bold | color(Color::YellowLight),
+            filler(),
+            text("[ ESC / Клик — закрыть ]") | color(Color::GrayLight)
+        }),
+        separator(),
+        text(""),
+        hbox(Elements{
+            text("  ▸ Оружие:     ") | bold | color(Color::GrayLight),
+            text(w.weaponName) | bold | color(Color::White)
+        }),
+        text(""),
+        hbox(Elements{
+            text("  ▸ Скин:       ") | bold | color(Color::GrayLight),
+            text(sName) | bold | color(Color::CyanLight)
+        }),
+        text(""),
+        hbox(Elements{
+            text("  ▸ Расцветка:  ") | bold | color(Color::GrayLight),
+            text(cName) | bold | color(Color::GreenLight)
+        }),
+        text(""),
+        hbox(Elements{
+            text("  ▸ Полное имя: ") | bold | color(Color::GrayLight),
+            text(fullTitle) | bold | color(Color::YellowLight)
+        }),
+        text(""),
+        separator(),
+        text(""),
+        closeBtn | center,
+        text("")
+    })
+    | borderStyled(ftxui::DOUBLE, Color::Cyan)
+    | bgcolor(Color::RGB(12, 16, 24))
+    | size(WIDTH, EQUAL, 66)
+    | reflect(g_skinModalBox);
+
+    return vbox(Elements{
+        filler(),
+        hbox(Elements{
+            filler(),
+            card,
+            filler()
+        }),
+        filler()
+    });
 }
 
 inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
@@ -376,6 +455,25 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
         });
     }
 
+    const WeaponSkinInfo* selWsi = nullptr;
+    if (!g_selectedSkinWeaponUuid.empty()) {
+        for (const auto& [_, w] : loadout.weapons) {
+            if (w.weaponUuid == g_selectedSkinWeaponUuid) {
+                selWsi = &w;
+                break;
+            }
+        }
+    }
+
+    Element selectedBar = text("");
+    if (selWsi) {
+        selectedBar = hbox({
+            text(" ▸ Выбран скин: ") | bold | color(Color::CyanLight),
+            text(selWsi->fullName) | bold | color(Color::YellowLight),
+            text(" (кликните ещё раз или нажмите ESC чтобы закрыть)") | color(Color::GrayLight)
+        }) | center | borderStyled(ROUNDED, Color::Cyan) | bgcolor(Color::RGB(15, 25, 35));
+    }
+
     auto headerBox = vbox({
         hbox({
             text(" Игрок: ") | bold | color(Color::GrayLight),
@@ -402,19 +500,35 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
         })
     });
 
+    Elements bottomArea;
+    if (selWsi) {
+        bottomArea.push_back(selectedBar);
+        bottomArea.push_back(text(""));
+    }
+    bottomArea.push_back(hbox({
+        backBtn,
+        text("   "),
+        trackerBtn
+    }) | center);
+
     auto contentBox = vbox({
         headerBox,
         separator(),
         skinsBody,
         separator(),
-        hbox({
-            backBtn,
-            text("   "),
-            trackerBtn
-        }) | center
+        vbox(std::move(bottomArea))
     }) | border;
 
-    return vbox({
+    Element rootElement = vbox({
         contentBox | size(WIDTH, GREATER_THAN, 80) | size(WIDTH, LESS_THAN, 110) | center
     });
+
+    if (selWsi) {
+        return dbox({
+            rootElement,
+            renderSkinDetailModal(*selWsi)
+        });
+    }
+
+    return rootElement;
 }
