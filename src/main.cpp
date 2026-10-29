@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.3.4";
+const std::string CURRENT_VERSION = "v3.3.5";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -4090,6 +4090,8 @@ int main() {
                                 auto j = json::parse(res.body);
                                 std::string status = "";
                                 if (j.contains("Penalties") && j["Penalties"].is_array()) {
+                                    std::vector<std::string> penaltyEntries;
+                                    std::set<std::string> seen;
                                     for (const auto& p : j["Penalties"]) {
                                         std::string type = getJsonKeyStr(p, {"Penalty"});
                                         if (type.empty()) type = getJsonKeyStr(p, {"PenaltyType"});
@@ -4117,7 +4119,29 @@ int main() {
                                                 mskTime = std::string(buf) + " (МСК)";
                                             }
                                         }
-                                        status += "[ НАКАЗАНИЕ: " + type + " | Истекает: " + mskTime + " ] ";
+
+                                        std::string friendlyName = type;
+                                        if (type == "RESTRICTION" || type == "QUEUE_RESTRICTION" || type == "COMPETITIVE_RESTRICTION") {
+                                            friendlyName = "Бан поиска";
+                                        } else if (type == "CHAT_RESTRICTION") {
+                                            friendlyName = "Бан чата";
+                                        } else if (type == "VOICE_RESTRICTION") {
+                                            friendlyName = "Бан войса";
+                                        } else if (type == "COMMUNICATIONS_RESTRICTION") {
+                                            friendlyName = "Бан чата и войса";
+                                        } else if (type == "TIME_BAN" || type == "BAN") {
+                                            friendlyName = "Бан аккаунта";
+                                        }
+
+                                        std::string entry = friendlyName + " до " + mskTime;
+                                        if (!seen.count(entry)) {
+                                            seen.insert(entry);
+                                            penaltyEntries.push_back(entry);
+                                        }
+                                    }
+                                    for (size_t i = 0; i < penaltyEntries.size(); ++i) {
+                                        if (i > 0) status += " | ";
+                                        status += penaltyEntries[i];
                                     }
                                 }
                                 { std::lock_guard<std::mutex> lk(g_penaltiesMutex); g_penaltiesStatus = status; }

@@ -414,6 +414,9 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     bool noSkins = (loadout.loaded && customCount == 0) || (g_selectedPlayerInfo.skinsLoaded && g_selectedPlayerInfo.customSkinCount == 0);
     ftxui::Color nameCol = noSkins ? Color::RedLight : Color::White;
     ftxui::Element nameTitle = text(fullName) | bold | color(nameCol);
+    if (noSkins) {
+        nameTitle = hbox(Elements{ nameTitle, text(" [СМУРФ]") | color(Color::RedLight) | bold });
+    }
     if (g_selectedPlayerInfo.isMuted) {
         nameTitle = hbox(Elements{ nameTitle, text(" [В МУТЕ]") | color(Color::RedLight) | bold });
     }

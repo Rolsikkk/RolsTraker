@@ -326,6 +326,7 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
             nameParts.push_back(ftxui::text(statusStr) | ftxui::bold | ftxui::inverted | ftxui::color(ftxui::Color::Red));
         } else if (hasNoSkins) {
             nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
+            nameParts.push_back(ftxui::text("[СМУРФ] ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
         } else if ((p.hasKuronami ? 1 : 0) + (p.hasNocturnum ? 1 : 0) + (p.hasPrimordium ? 1 : 0) >= 2) {
             nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::bgcolor(ftxui::Color::RGB(40, 20, 50)));
         } else if (p.hasKuronami) {
@@ -594,6 +595,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
                 myPeakRR = rk.peakRR;
             }
         }
+        std::string penaltiesStatus;
+        { std::lock_guard<std::mutex> lk(g_penaltiesMutex); penaltiesStatus = g_penaltiesStatus; }
+
         auto myMmrBadge = renderMyMMRBadge(myTier, myRR, myPeakTier, myPeakRR, 0);
 
         return ftxui::vbox({
@@ -609,8 +613,10 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             }) | ftxui::center,
             ftxui::text(""),
             myMmrBadge,
-            ftxui::text(""),
-            ftxui::text(" [F11 / M] Развернуть на весь экран | [Q] Выход ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
+            (!penaltiesStatus.empty() ? ftxui::vbox({
+                ftxui::text(""),
+                ftxui::text(" ⛔ " + penaltiesStatus + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center
+            }) : ftxui::text("")),
             ftxui::filler(),
         });
     }
@@ -682,7 +688,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     int localElo = 0;
     for (const auto& p : state.players) {
         if (p.rankTier >= 3) {
-            int elo = p.rankTier * 100 + p.rankRR;
+            int elo = (p.rankTier - 2) * 100 + p.rankRR;
             totalLobbyElo += elo;
             rankedPlayers++;
             if (p.puuid == session.puuid) {
@@ -760,10 +766,15 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
                 myPeakRR = rk.peakRR;
             }
         }
-        int avgElo = (rankedPlayers > 0) ? (totalLobbyElo / rankedPlayers) : 0;
+        int avgElo = (rankedPlayers > 1) ? (totalLobbyElo / rankedPlayers) : 0;
         auto myMmrBadge = renderMyMMRBadge(myTier, myRR, myPeakTier, myPeakRR, avgElo);
         uiElements.push_back(ftxui::separator());
         uiElements.push_back(myMmrBadge);
+    }
+
+    if (!penaltiesStatus.empty()) {
+        uiElements.push_back(ftxui::separator());
+        uiElements.push_back(ftxui::text(" ⛔ " + penaltiesStatus + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center);
     }
 
     uiElements.push_back(ftxui::separator());
@@ -784,8 +795,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         ) : ftxui::text("")),
         ftxui::filler() | ftxui::flex,
         renderButton("Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
-        ftxui::filler() | ftxui::flex,
-        (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) : ftxui::text(""))
+        ftxui::filler() | ftxui::flex
     }));
 
     return ftxui::vbox(std::move(uiElements)) | ftxui::border;
