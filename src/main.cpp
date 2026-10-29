@@ -2311,6 +2311,8 @@ struct ChromaMetadata {
     std::string chromaUuid;
     std::string skinUuid;
     std::string variantName;
+    int chromaIndex = 0;
+    int totalChromas = 1;
 };
 
 static std::map<std::string, SkinMetadata> g_skinMetaMap;
@@ -2321,24 +2323,29 @@ static std::mutex g_weaponDbMutex;
 static std::atomic<bool> g_weaponDbLoaded{false};
 
 static std::string extractChromaVariant(const std::string& chromaDisplayName, const std::string& skinDisplayName) {
-    if (chromaDisplayName.empty() || chromaDisplayName == skinDisplayName) return "";
+    if (chromaDisplayName.empty()) return "";
+
+    std::string clean = chromaDisplayName;
+    for (auto& c : clean) {
+        if (c == '\r' || c == '\n') c = ' ';
+    }
     
     // Look for (расцветка ... "VARIANT") or ("VARIANT")
-    size_t lastQuote = chromaDisplayName.rfind('"');
+    size_t lastQuote = clean.rfind('"');
     if (lastQuote != std::string::npos && lastQuote > 0) {
-        size_t prevQuote = chromaDisplayName.rfind('"', lastQuote - 1);
+        size_t prevQuote = clean.rfind('"', lastQuote - 1);
         if (prevQuote != std::string::npos && prevQuote < lastQuote) {
-            std::string variant = chromaDisplayName.substr(prevQuote + 1, lastQuote - prevQuote - 1);
-            if (variant != skinDisplayName && !variant.empty() && variant.length() < 30) {
+            std::string variant = clean.substr(prevQuote + 1, lastQuote - prevQuote - 1);
+            if (variant != skinDisplayName && !variant.empty() && variant.length() < 35) {
                 return variant;
             }
         }
     }
     
-    size_t pOpen = chromaDisplayName.find('(');
-    size_t pClose = chromaDisplayName.rfind(')');
+    size_t pOpen = clean.rfind('(');
+    size_t pClose = clean.rfind(')');
     if (pOpen != std::string::npos && pClose != std::string::npos && pClose > pOpen) {
-        std::string inner = chromaDisplayName.substr(pOpen + 1, pClose - pOpen - 1);
+        std::string inner = clean.substr(pOpen + 1, pClose - pOpen - 1);
         size_t q1 = inner.find('"');
         size_t q2 = inner.rfind('"');
         if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
@@ -2414,7 +2421,9 @@ static void parseWeaponsJson(const std::string& jsonStr) {
                     }
 
                     if (s.contains("chromas") && s["chromas"].is_array()) {
-                        for (const auto& c : s["chromas"]) {
+                        size_t totalChromas = s["chromas"].size();
+                        for (size_t cIdx = 0; cIdx < totalChromas; ++cIdx) {
+                            const auto& c = s["chromas"][cIdx];
                             std::string cUuid = getJsonKeyStr(c, {"uuid"});
                             std::string cName = getJsonKeyStr(c, {"displayName"});
                             if (cUuid.empty()) continue;
@@ -2425,7 +2434,23 @@ static void parseWeaponsJson(const std::string& jsonStr) {
                             ChromaMetadata cm;
                             cm.chromaUuid = cUuid;
                             cm.skinUuid = sUuid;
-                            cm.variantName = extractChromaVariant(cName, sName);
+                            cm.chromaIndex = (int)(cIdx + 1);
+                            cm.totalChromas = (int)totalChromas;
+
+                            if (totalChromas > 1) {
+                                if (cIdx == 0) {
+                                    cm.variantName = "Базовая";
+                                } else {
+                                    std::string v = extractChromaVariant(cName, sName);
+                                    if (v.empty()) {
+                                        v = "Расцветка " + std::to_string(cIdx + 1);
+                                    }
+                                    cm.variantName = v;
+                                }
+                            } else {
+                                cm.variantName = "";
+                            }
+
                             g_chromaMetaMap[cUuid] = cm;
                             g_chromaMetaMap[cUuidLower] = cm;
 
@@ -2545,16 +2570,20 @@ static WeaponSkinInfo resolveWeaponSkin(const std::string& weaponUuid, const std
         wsi.isCustom = true;
         
         std::string varName = "";
+        bool hasChromas = false;
         {
             std::lock_guard<std::mutex> lk(g_weaponDbMutex);
             if (g_chromaMetaMap.count(chromaUuid)) {
                 varName = g_chromaMetaMap[chromaUuid].variantName;
+                hasChromas = (g_chromaMetaMap[chromaUuid].totalChromas > 1);
             } else if (g_chromaMetaMap.count(cUuidLower)) {
                 varName = g_chromaMetaMap[cUuidLower].variantName;
+                hasChromas = (g_chromaMetaMap[cUuidLower].totalChromas > 1);
             }
         }
         wsi.chromaName = varName;
-        if (!varName.empty()) {
+        wsi.hasChromas = hasChromas;
+        if (!varName.empty() && varName != "Базовая") {
             wsi.fullName = sName + " (" + varName + ")";
         } else {
             wsi.fullName = sName;
@@ -3558,8 +3587,13 @@ int main() {
     Log("Console window set");
 
     std::thread([]() {
-        try { checkAutoUpdate(); }
-        catch (...) { Log("Auto-update thread failed"); }
+        while (g_running) {
+            try { checkAutoUpdate(); }
+            catch (...) { Log("Auto-update thread failed"); }
+            for (int i = 0; i < 180 && g_running; ++i) {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        }
     }).detach();
     Log("Starting initWeaponsDatabase");
     initWeaponsDatabase();

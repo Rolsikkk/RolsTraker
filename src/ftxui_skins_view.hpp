@@ -22,6 +22,7 @@ struct WeaponSkinInfo {
     std::string chromaName;
     std::string fullName;
     bool isCustom = false;
+    bool hasChromas = false;
 };
 
 struct PlayerWeaponLoadout {
@@ -202,18 +203,6 @@ inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Col
         Color nameColor = w.isCustom ? Color::CyanLight : Color::GrayLight;
         Color skinColor = w.isCustom ? Color::YellowLight : Color::GrayDark;
         
-        std::string dispSkin = w.fullName;
-        if (dispSkin.empty()) {
-            dispSkin = "Стандартный " + w.weaponName;
-        }
-
-        std::replace(dispSkin.begin(), dispSkin.end(), '\n', ' ');
-
-        // Safe truncation to keep width compact
-        if (dispSkin.length() > 32) {
-            dispSkin = utf8_substr(dispSkin, 30) + "..";
-        }
-
         bool isKuro = isKuronamiName(w.skinName, w.fullName);
         bool isNoct = isNocturnumName(w.skinName, w.fullName);
         bool isPrim = isPrimordiumName(w.skinName, w.fullName);
@@ -228,16 +217,66 @@ inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Col
         Element starIcon = (w.isCustom || isKuro || isNoct || isPrim)
             ? (text("* ") | color(skinColor) | bold)
             : (text(". ") | color(Color::GrayDark));
+
+        std::string dispSkin = w.skinName;
+        if (dispSkin.empty() || !w.isCustom) {
+            dispSkin = "Стандартный " + w.weaponName;
+        }
+
+        std::replace(dispSkin.begin(), dispSkin.end(), '\n', ' ');
+
+        // Safe truncation based on UTF-8 code point count (not byte length)
+        if (utf8_length(dispSkin) > 22) {
+            dispSkin = utf8_substr(dispSkin, 20) + "..";
+        }
+
         Element skinText = text(dispSkin) | color(skinColor);
         if (w.isCustom || isKuro || isNoct || isPrim) skinText = skinText | bold;
         if (isKuro) skinText = skinText | bgcolor(Color::RGB(15, 45, 65));
         else if (isNoct) skinText = skinText | bgcolor(Color::RGB(55, 10, 45));
         else if (isPrim) skinText = skinText | bgcolor(Color::RGB(65, 20, 10));
 
+        // Display chroma (раскраска) for guns that have a custom skin
+        Element chromaElement = text("");
+        if (w.isCustom && !w.chromaName.empty()) {
+            Color chromaColor = Color::CyanLight;
+            std::string cLow = w.chromaName;
+            for (auto& ch : cLow) ch = tolower(ch);
+
+            if (w.chromaName == "Базовая") {
+                chromaColor = Color::GrayLight;
+            } else if (cLow.find("красн") != std::string::npos || cLow.find("red") != std::string::npos) {
+                chromaColor = Color::RedLight;
+            } else if (cLow.find("син") != std::string::npos || cLow.find("blue") != std::string::npos) {
+                chromaColor = Color::BlueLight;
+            } else if (cLow.find("зел") != std::string::npos || cLow.find("green") != std::string::npos) {
+                chromaColor = Color::GreenLight;
+            } else if (cLow.find("желт") != std::string::npos || cLow.find("золот") != std::string::npos || cLow.find("gold") != std::string::npos || cLow.find("yellow") != std::string::npos) {
+                chromaColor = Color::YellowLight;
+            } else if (cLow.find("фиол") != std::string::npos || cLow.find("пурпур") != std::string::npos || cLow.find("purple") != std::string::npos) {
+                chromaColor = Color::MagentaLight;
+            } else if (cLow.find("розов") != std::string::npos || cLow.find("pink") != std::string::npos) {
+                chromaColor = Color::MagentaLight;
+            } else if (cLow.find("оранж") != std::string::npos || cLow.find("orange") != std::string::npos) {
+                chromaColor = Color::Gold1;
+            } else if (cLow.find("черн") != std::string::npos || cLow.find("black") != std::string::npos || cLow.find("обсидиан") != std::string::npos) {
+                chromaColor = Color::White;
+            } else if (cLow.find("бел") != std::string::npos || cLow.find("white") != std::string::npos || cLow.find("серебр") != std::string::npos || cLow.find("silver") != std::string::npos) {
+                chromaColor = Color::White;
+            }
+
+            chromaElement = hbox({
+                text(" "),
+                text("[" + w.chromaName + "]") | bold | color(chromaColor) | bgcolor(Color::RGB(22, 28, 38))
+            });
+        }
+
         Element row = hbox({
             text(" " + w.weaponName) | color(nameColor) | bold | size(WIDTH, EQUAL, 10),
             starIcon,
-            skinText | flex
+            skinText,
+            chromaElement,
+            filler()
         });
         rows.push_back(row);
     }
