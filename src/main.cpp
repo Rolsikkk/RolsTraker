@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.3.5";
+const std::string CURRENT_VERSION = "v3.3.6";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -4521,7 +4521,11 @@ int main() {
             } else if (g_dodgeConfirm) {
                 g_dodgeConfirm = false;
                 return true;
+            } else if (g_currentView == AppView::PLAYER_STATS && !g_selectedSkinWeaponUuid.empty()) {
+                g_selectedSkinWeaponUuid = "";
+                return true;
             } else if (g_currentView != AppView::MAIN) {
+                g_selectedSkinWeaponUuid = "";
                 g_currentView = AppView::MAIN;
                 return true;
             }
@@ -4762,6 +4766,7 @@ int main() {
                         g_selectedPlayerInfo.isLoading = false;
                     }
                     g_playerProfileTab = PlayerProfileTab::SKINS;
+                    g_selectedSkinWeaponUuid = "";
                     fetchPlayerLoadoutDirect(session, session.puuid);
                     g_currentView = AppView::PLAYER_STATS;
                     return true;
@@ -4817,6 +4822,7 @@ int main() {
                             }
                         }
                         g_playerProfileTab = PlayerProfileTab::SKINS;
+                        g_selectedSkinWeaponUuid = "";
                         fetchPlayerLoadoutDirect(session, puuid);
                         g_currentView = AppView::PLAYER_STATS;
                         return true;

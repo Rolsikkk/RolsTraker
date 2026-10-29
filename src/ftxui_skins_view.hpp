@@ -278,7 +278,7 @@ inline ftxui::Element renderCategorySection(const std::string& title, ftxui::Col
         }
 
         bool isSelected = (g_selectedSkinWeaponUuid == w.weaponUuid);
-        bool isHovered = g_skinRowBoxes.count(w.weaponUuid) && g_skinRowBoxes[w.weaponUuid].Contain(g_mouseX, g_mouseY);
+        bool isHovered = g_selectedSkinWeaponUuid.empty() && g_skinRowBoxes.count(w.weaponUuid) && g_skinRowBoxes[w.weaponUuid].Contain(g_mouseX, g_mouseY);
 
         Element row = hbox({
             text(" " + w.weaponName) | color(nameColor) | bold | size(WIDTH, EQUAL, 10),
@@ -323,23 +323,13 @@ inline ftxui::Element renderSkinDetailModal(const WeaponSkinInfo& w) {
         separator(),
         text(""),
         hbox(Elements{
-            text("  ▸ Оружие:     ") | bold | color(Color::GrayLight),
-            text(w.weaponName) | bold | color(Color::White)
-        }),
-        text(""),
-        hbox(Elements{
-            text("  ▸ Скин:       ") | bold | color(Color::GrayLight),
+            text("  ▸ Скин:      ") | bold | color(Color::GrayLight),
             text(sName) | bold | color(Color::CyanLight)
         }),
         text(""),
         hbox(Elements{
-            text("  ▸ Расцветка:  ") | bold | color(Color::GrayLight),
+            text("  ▸ Расцветка: ") | bold | color(Color::GrayLight),
             text(cName) | bold | color(Color::GreenLight)
-        }),
-        text(""),
-        hbox(Elements{
-            text("  ▸ Полное имя: ") | bold | color(Color::GrayLight),
-            paragraph(fullTitle) | bold | color(Color::YellowLight)
         }),
         text(""),
         separator(),
@@ -352,8 +342,8 @@ inline ftxui::Element renderSkinDetailModal(const WeaponSkinInfo& w) {
     | borderStyled(ftxui::DOUBLE, Color::Cyan)
     | bgcolor(Color::Black)
     | clear_under
-    | size(WIDTH, GREATER_THAN, 68)
-    | size(WIDTH, LESS_THAN, 84)
+    | size(WIDTH, GREATER_THAN, 55)
+    | size(WIDTH, LESS_THAN, 75)
     | reflect(g_skinModalBox);
 
     return vbox(Elements{
@@ -510,10 +500,6 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     });
 
     Elements bottomArea;
-    if (selWsi) {
-        bottomArea.push_back(selectedBar);
-        bottomArea.push_back(text(""));
-    }
     bottomArea.push_back(hbox(Elements{
         backBtn,
         text("   "),

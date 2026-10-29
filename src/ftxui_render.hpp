@@ -91,7 +91,11 @@ extern std::chrono::steady_clock::time_point g_postMatchStartTime;
 
 // Animated button renderer with idle, hover, pressed, and click animation
 inline ftxui::Element renderButton(const std::string& text, const ftxui::Box& box, ftxui::Color baseColor, const std::string& btnId, bool isPressed) {
+    bool isSkinModalActive = (g_currentView == AppView::PLAYER_STATS && !g_selectedSkinWeaponUuid.empty());
     bool hovered = box.Contain(g_mouseX, g_mouseY);
+    if (isSkinModalActive && btnId != "skin_modal_close") {
+        hovered = false;
+    }
     bool pressed = hovered && isPressed;
     auto now = std::chrono::steady_clock::now();
     bool justClicked = (g_activeButton == btnId) && (std::chrono::duration_cast<std::chrono::milliseconds>(now - g_lastButtonClickTime).count() < 220);
