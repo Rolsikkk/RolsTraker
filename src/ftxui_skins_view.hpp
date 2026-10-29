@@ -152,7 +152,7 @@ inline bool checkPrimordiumWeapon(const std::string& wName, const std::string& s
 }
 
 extern std::map<std::string, PlayerWeaponLoadout> g_playerLoadouts;
-extern std::mutex g_loadoutsMutex;
+extern std::recursive_mutex g_loadoutsMutex;
 extern ftxui::Box g_tabSkinsBox;
 extern ftxui::Box g_tabStatsBox;
 

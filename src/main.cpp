@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.2.8";
+const std::string CURRENT_VERSION = "v3.2.9";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -2323,7 +2323,7 @@ PlayerProfileTab g_playerProfileTab = PlayerProfileTab::SKINS;
 ftxui::Box g_tabSkinsBox;
 ftxui::Box g_tabStatsBox;
 std::map<std::string, PlayerWeaponLoadout> g_playerLoadouts;
-std::mutex g_loadoutsMutex;
+std::recursive_mutex g_loadoutsMutex;
 
 struct DefaultWeaponMeta {
     std::string uuid;
@@ -2666,7 +2666,7 @@ static bool getPlayerLoadout(const std::string& puuid, PlayerWeaponLoadout& out)
     std::string up = puuid;
     for (auto& c : up) c = toupper(c);
 
-    std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+    std::lock_guard<std::recursive_mutex> lk(g_loadoutsMutex);
     if (g_playerLoadouts.count(puuid) && g_playerLoadouts[puuid].loaded) {
         out = g_playerLoadouts[puuid];
         return true;
@@ -2778,7 +2778,7 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
                     std::string sUpper = subject;
                     for (auto& c : sUpper) c = toupper(c);
 
-                    std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+                    std::lock_guard<std::recursive_mutex> lk(g_loadoutsMutex);
                     g_playerLoadouts[subject] = pLoadout;
                     g_playerLoadouts[sLower] = pLoadout;
                     g_playerLoadouts[sUpper] = pLoadout;
@@ -2822,7 +2822,7 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
                 std::string sUpper = subject;
                 for (auto& c : sUpper) c = toupper(c);
 
-                std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+                std::lock_guard<std::recursive_mutex> lk(g_loadoutsMutex);
                 g_playerLoadouts[subject] = pLoadout;
                 g_playerLoadouts[sLower] = pLoadout;
                 g_playerLoadouts[sUpper] = pLoadout;
@@ -2836,7 +2836,7 @@ static void fetchPlayerLoadoutDirect(const Session& session, const std::string& 
     
     bool needsFetch = false;
     {
-        std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+        std::lock_guard<std::recursive_mutex> lk(g_loadoutsMutex);
         if (!g_playerLoadouts.count(puuid) || !g_playerLoadouts[puuid].loaded) {
             needsFetch = true;
         }
@@ -2895,7 +2895,7 @@ static void updateMatchLoadouts(const Session& session, const MatchState& state)
     auto now = std::chrono::steady_clock::now();
     bool matchChanged = (g_lastLoadedMatchId != state.matchId);
     if (matchChanged) {
-        std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+        std::lock_guard<std::recursive_mutex> lk(g_loadoutsMutex);
         g_playerLoadouts.clear();
         g_lastLoadedMatchId = state.matchId;
     }
@@ -2963,7 +2963,7 @@ struct DetectedPartyInfo {
 
 static std::map<std::string, std::vector<std::string>> g_playerMatchHistoryCache;
 static std::map<std::string, DetectedPartyInfo> g_detectedParties;
-static std::mutex g_partyDetectionMutex;
+static std::recursive_mutex g_partyDetectionMutex;
 static std::string g_lastPartyCheckMatchId = "";
 static bool g_partyCheckRunning = false;
 static std::chrono::steady_clock::time_point g_lastPartyCheckTime;
@@ -2977,7 +2977,7 @@ static void detectPartiesFromMatchHistory(const Session& session, const MatchSta
     
     bool allCached = true;
     {
-        std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+        std::lock_guard<std::recursive_mutex> lk(g_partyDetectionMutex);
         if (g_partyCheckRunning) return;
         for (const auto& p : state.players) {
             if (!p.puuid.empty() && !g_playerMatchHistoryCache.count(p.puuid)) {
@@ -2993,7 +2993,7 @@ static void detectPartiesFromMatchHistory(const Session& session, const MatchSta
     }
 
     {
-        std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+        std::lock_guard<std::recursive_mutex> lk(g_partyDetectionMutex);
         g_partyCheckRunning = true;
         g_lastPartyCheckMatchId = state.matchId;
         g_lastPartyCheckTime = now;
@@ -3017,7 +3017,7 @@ static void detectPartiesFromMatchHistory(const Session& session, const MatchSta
                 if (p.puuid.empty()) continue;
                 bool needsFetch = false;
                 {
-                    std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                    std::lock_guard<std::recursive_mutex> lk(g_partyDetectionMutex);
                     if (!g_playerMatchHistoryCache.count(p.puuid)) {
                         needsFetch = true;
                     }
@@ -3037,7 +3037,7 @@ static void detectPartiesFromMatchHistory(const Session& session, const MatchSta
                                 }
                             }
                             {
-                                std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                                std::lock_guard<std::recursive_mutex> lk(g_partyDetectionMutex);
                                 if (g_playerMatchHistoryCache.size() > 500) {
                                     g_playerMatchHistoryCache.erase(g_playerMatchHistoryCache.begin());
                                 }
@@ -3074,7 +3074,7 @@ static void detectPartiesFromMatchHistory(const Session& session, const MatchSta
                     for (int j = i + 1; j < n; ++j) {
                         std::vector<std::string> histI, histJ;
                         {
-                            std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                            std::lock_guard<std::recursive_mutex> lk(g_partyDetectionMutex);
                             if (g_playerMatchHistoryCache.count(team[i].puuid)) histI = g_playerMatchHistoryCache[team[i].puuid];
                             if (g_playerMatchHistoryCache.count(team[j].puuid)) histJ = g_playerMatchHistoryCache[team[j].puuid];
                         }
@@ -3146,13 +3146,13 @@ static void detectPartiesFromMatchHistory(const Session& session, const MatchSta
             }
 
             {
-                std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                std::lock_guard<std::recursive_mutex> lk(g_partyDetectionMutex);
                 g_detectedParties = newDetectedParties;
             }
         } catch (...) {}
 
         {
-            std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+            std::lock_guard<std::recursive_mutex> lk(g_partyDetectionMutex);
             g_partyCheckRunning = false;
         }
     }).detach();
@@ -3831,7 +3831,7 @@ int main() {
                             g_lastLoadedMatchId = "";
                             g_lastPartyCheckMatchId = "";
                             {
-                                std::lock_guard<std::mutex> lk(g_partyDetectionMutex);
+                                std::lock_guard<std::recursive_mutex> lk(g_partyDetectionMutex);
                                 g_detectedParties.clear();
                             }
                             if (!newSession.puuid.empty()) {
@@ -4006,7 +4006,7 @@ int main() {
                         g_selectedPlayerInfo.isLoading = false;
                     }
                     {
-                        std::lock_guard<std::mutex> lkLoad(g_loadoutsMutex);
+                        std::lock_guard<std::recursive_mutex> lkLoad(g_loadoutsMutex);
                         if (g_playerLoadouts.count(g_selectedPuuid)) {
                             const auto& pl = g_playerLoadouts[g_selectedPuuid];
                             if (pl.loaded) {
@@ -4048,7 +4048,7 @@ int main() {
                         }
                     }
                     {
-                        std::lock_guard<std::mutex> lkParty(g_partyDetectionMutex);
+                        std::lock_guard<std::recursive_mutex> lkParty(g_partyDetectionMutex);
                         if (g_detectedParties.count(g_selectedPuuid)) {
                             const auto& dpi = g_detectedParties[g_selectedPuuid];
                             g_selectedPlayerInfo.detectedPartySize = dpi.partySize;
@@ -4094,54 +4094,51 @@ int main() {
                 }
 
                 // Sync loadout and booster status
-                {
-                    std::lock_guard<std::mutex> lkLoad(g_loadoutsMutex);
-                    for (auto& p : matchState.players) {
-                        PlayerWeaponLoadout pl;
-                        if (getPlayerLoadout(p.puuid, pl)) {
-                            if (pl.loaded) {
-                                int cCount = 0;
-                                bool kFound = false;
-                                std::string kWeapon = "";
-                                bool nFound = false;
-                                std::string nWeapon = "";
-                                bool prFound = false;
-                                std::string prWeapon = "";
-                                for (const auto& [wId, w] : pl.weapons) {
-                                    if (w.isCustom) cCount++;
-                                    std::string outW;
-                                    if (checkKuronamiWeapon(w.weaponName, w.skinName, w.fullName, outW)) {
-                                        kFound = true;
-                                        kWeapon = outW;
-                                    }
-                                    std::string outN;
-                                    if (checkNocturnumWeapon(w.weaponName, w.skinName, w.fullName, outN)) {
-                                        nFound = true;
-                                        nWeapon = outN;
-                                    }
-                                    std::string outPr;
-                                    if (checkPrimordiumWeapon(w.weaponName, w.skinName, w.fullName, outPr)) {
-                                        prFound = true;
-                                        prWeapon = outPr;
-                                    }
+                for (auto& p : matchState.players) {
+                    PlayerWeaponLoadout pl;
+                    if (getPlayerLoadout(p.puuid, pl)) {
+                        if (pl.loaded) {
+                            int cCount = 0;
+                            bool kFound = false;
+                            std::string kWeapon = "";
+                            bool nFound = false;
+                            std::string nWeapon = "";
+                            bool prFound = false;
+                            std::string prWeapon = "";
+                            for (const auto& [wId, w] : pl.weapons) {
+                                if (w.isCustom) cCount++;
+                                std::string outW;
+                                if (checkKuronamiWeapon(w.weaponName, w.skinName, w.fullName, outW)) {
+                                    kFound = true;
+                                    kWeapon = outW;
                                 }
-                                p.skinsLoaded = true;
-                                p.customSkinCount = cCount;
-                                p.isBooster = (cCount <= 2);
-                                p.hasKuronami = kFound;
-                                p.kuronamiWeapon = kWeapon;
-                                p.hasNocturnum = nFound;
-                                p.nocturnumWeapon = nWeapon;
-                                p.hasPrimordium = prFound;
-                                p.primordiumWeapon = prWeapon;
+                                std::string outN;
+                                if (checkNocturnumWeapon(w.weaponName, w.skinName, w.fullName, outN)) {
+                                    nFound = true;
+                                    nWeapon = outN;
+                                }
+                                std::string outPr;
+                                if (checkPrimordiumWeapon(w.weaponName, w.skinName, w.fullName, outPr)) {
+                                    prFound = true;
+                                    prWeapon = outPr;
+                                }
                             }
+                            p.skinsLoaded = true;
+                            p.customSkinCount = cCount;
+                            p.isBooster = (cCount <= 2);
+                            p.hasKuronami = kFound;
+                            p.kuronamiWeapon = kWeapon;
+                            p.hasNocturnum = nFound;
+                            p.nocturnumWeapon = nWeapon;
+                            p.hasPrimordium = prFound;
+                            p.primordiumWeapon = prWeapon;
                         }
                     }
                 }
 
                 // Sync detected parties
                 {
-                    std::lock_guard<std::mutex> lkParty(g_partyDetectionMutex);
+                    std::lock_guard<std::recursive_mutex> lkParty(g_partyDetectionMutex);
                     for (auto& p : matchState.players) {
                         if (g_detectedParties.count(p.puuid)) {
                             const auto& dpi = g_detectedParties[p.puuid];
