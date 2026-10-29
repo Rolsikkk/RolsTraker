@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.2.2";
+const std::string CURRENT_VERSION = "v3.2.3";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -125,8 +125,27 @@ void Log(const std::string& msg) {
 }
 
 static std::string g_discordClientId = "1558391767168978964";
+static int g_windowWidth = 1080;
+static int g_windowHeight = 680;
 
-void saveSettings() {}
+void saveSettings() {
+    try {
+        std::string settingsPath = getExeDir() + "\\settings.json";
+        json j;
+        std::ifstream in(settingsPath);
+        if (in.is_open()) {
+            try { in >> j; } catch (...) {}
+        }
+        j["discordClientId"] = g_discordClientId;
+        j["windowWidth"] = g_windowWidth;
+        j["windowHeight"] = g_windowHeight;
+        std::ofstream out(settingsPath);
+        if (out.is_open()) {
+            out << j.dump(4);
+        }
+    } catch (...) {}
+}
+
 void loadSettings() {
     try {
         std::string settingsPath = getExeDir() + "\\settings.json";
@@ -137,12 +156,14 @@ void loadSettings() {
             if (j.contains("discordClientId") && j["discordClientId"].is_string()) {
                 g_discordClientId = j["discordClientId"].get<std::string>();
             }
-        } else {
-            std::ofstream out(settingsPath);
-            if (out.is_open()) {
-                json j = {{"discordClientId", g_discordClientId}};
-                out << j.dump(4);
+            if (j.contains("windowWidth") && j["windowWidth"].is_number_integer()) {
+                g_windowWidth = j["windowWidth"].get<int>();
             }
+            if (j.contains("windowHeight") && j["windowHeight"].is_number_integer()) {
+                g_windowHeight = j["windowHeight"].get<int>();
+            }
+        } else {
+            saveSettings();
         }
     } catch (...) {}
 }
@@ -3488,15 +3509,15 @@ static void applyOptimalWindowSize() {
                 return TRUE;
             }, reinterpret_cast<LPARAM>(&emd));
 
-            int targetW = 880;
-            int targetH = 680;
+            int targetW = g_windowWidth > 0 ? g_windowWidth : 1080;
+            int targetH = g_windowHeight > 0 ? g_windowHeight : 680;
             int startX = 20, startY = 20;
 
             if (emd.foundPortrait) {
                 int workW = emd.targetRect.right - emd.targetRect.left;
                 int workH = emd.targetRect.bottom - emd.targetRect.top;
-                targetW = std::min(880, workW - 20);
-                targetH = std::min(680, workH - 40);
+                targetW = std::min(targetW, workW - 20);
+                targetH = std::min(targetH, workH - 40);
                 startX = emd.targetRect.left + (workW - targetW) / 2;
                 startY = emd.targetRect.top + 30;
             } else {
@@ -3505,8 +3526,8 @@ static void applyOptimalWindowSize() {
                 if (GetMonitorInfoA(hMon, &mi)) {
                     int workW = mi.rcWork.right - mi.rcWork.left;
                     int workH = mi.rcWork.bottom - mi.rcWork.top;
-                    targetW = std::min(880, workW - 20);
-                    targetH = std::min(680, workH - 40);
+                    targetW = std::min(targetW, workW - 20);
+                    targetH = std::min(targetH, workH - 40);
                     startX = mi.rcWork.left + (workW - targetW) / 2;
                     startY = mi.rcWork.top + (workH - targetH) / 2;
                 }
