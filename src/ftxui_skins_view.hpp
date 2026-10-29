@@ -358,9 +358,7 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
             g_selectedPlayerInfo.hasPrimordium
                 ? (hbox({ text(" [ ПЕРВОНАЧАЛО: " + (g_selectedPlayerInfo.primordiumWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.primordiumWeapon) + " ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(65, 20, 10)), text(" ") }))
                 : text(""),
-            (loadout.loaded && customCount <= 2)
-                ? (hbox({ text(" [ ВНИМАНИЕ: БУСТЕР (" + std::to_string(customCount) + " ск.) ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(70, 15, 15)), text(" ") }))
-                : text(""),
+
             text(" Особых скинов: " + std::to_string(customCount) + " из " + std::to_string(std::min(19, std::max(19, totalWeapons))) + " ") | color((loadout.loaded && customCount <= 2) ? Color::RedLight : Color::YellowLight) | bold
         })
     });

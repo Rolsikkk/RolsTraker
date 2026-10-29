@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.1.2";
+const std::string CURRENT_VERSION = "v3.2.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -77,6 +77,24 @@ static std::set<std::string> g_statsFetching;
 
 static std::recursive_mutex g_mutex;
 static std::atomic<bool> g_running{true};
+#ifndef UPDATE_INFO_DEFINED
+#define UPDATE_INFO_DEFINED
+struct UpdateInfo {
+    bool available = false;
+    std::string latestVersion;
+    std::string releaseTitle;
+    std::string releaseNotes;
+    std::string downloadUrl;
+    bool isDownloading = false;
+    std::string statusText;
+};
+#endif
+
+UpdateInfo g_updateInfo;
+bool g_showUpdateModal = false;
+ftxui::Box g_updateNowBox;
+ftxui::Box g_updateLaterBox;
+ftxui::Box g_updateBadgeBox;
 std::string g_updateStatus;
 std::mutex g_updateMutex;
 std::string g_penaltiesStatus;
@@ -383,7 +401,7 @@ HttpResponse httpRequest(
     return response;
 }
 
-bool downloadFileWithRedirects(const std::string& initialUrl, const std::string& outputPath) {
+bool downloadFileWithRedirects(const std::string& initialUrl, const std::string& outputPath, const std::string& authToken = "") {
     std::string currentUrl = initialUrl;
     for (int redirectCount = 0; redirectCount < 5; redirectCount++) {
         std::string host, path;
@@ -410,7 +428,14 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
         HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", wPath.c_str(), NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
         if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return false; }
 
-        BOOL bResults = WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
+        std::wstring customHeaders;
+        if (redirectCount == 0 && !authToken.empty()) {
+            customHeaders = L"Authorization: token " + utf8ToWide(authToken) + L"\r\nAccept: application/octet-stream\r\n";
+        }
+        LPCWSTR pHeaders = customHeaders.empty() ? WINHTTP_NO_ADDITIONAL_HEADERS : customHeaders.c_str();
+        DWORD dwHeadersLength = customHeaders.empty() ? 0 : (DWORD)customHeaders.length();
+
+        BOOL bResults = WinHttpSendRequest(hRequest, pHeaders, dwHeadersLength, WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
         if (bResults) bResults = WinHttpReceiveResponse(hRequest, NULL);
 
         if (!bResults) {
@@ -485,6 +510,125 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
     return false;
 }
 
+static std::string getGitHubAuthToken() {
+    const char* envTok = std::getenv("GITHUB_TOKEN");
+    if (envTok && strlen(envTok) > 0) return std::string(envTok);
+
+    try {
+        if (std::filesystem::exists("settings.json")) {
+            std::ifstream f("settings.json");
+            json j = json::parse(f);
+            if (j.contains("githubToken") && j["githubToken"].is_string()) return j["githubToken"].get<std::string>();
+            if (j.contains("github_token") && j["github_token"].is_string()) return j["github_token"].get<std::string>();
+        }
+    } catch (...) {}
+
+    FILE* pipe = _popen("gh auth token 2>nul", "r");
+    if (pipe) {
+        char buf[256];
+        std::string out;
+        while (fgets(buf, sizeof(buf), pipe)) out += buf;
+        _pclose(pipe);
+        while (!out.empty() && (out.back() == '\r' || out.back() == '\n' || out.back() == ' ')) out.pop_back();
+        if (!out.empty() && out.rfind("gh", 0) == 0) return out;
+    }
+    return "";
+}
+
+struct SemVer {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+    int build = 0;
+};
+
+static SemVer parseSemVer(const std::string& v) {
+    SemVer res;
+    int nums[4] = {0, 0, 0, 0};
+    int count = 0;
+    size_t i = 0;
+    while (i < v.size() && count < 4) {
+        if (isdigit(static_cast<unsigned char>(v[i]))) {
+            int n = 0;
+            while (i < v.size() && isdigit(static_cast<unsigned char>(v[i]))) {
+                n = n * 10 + (v[i] - '0');
+                ++i;
+            }
+            nums[count++] = n;
+        } else {
+            ++i;
+        }
+    }
+    res.major = nums[0];
+    res.minor = nums[1];
+    res.patch = nums[2];
+    res.build = nums[3];
+    return res;
+}
+
+static bool isNewerVersion(const std::string& remote, const std::string& local) {
+    SemVer r = parseSemVer(remote);
+    SemVer l = parseSemVer(local);
+    if (r.major != l.major) return r.major > l.major;
+    if (r.minor != l.minor) return r.minor > l.minor;
+    if (r.patch != l.patch) return r.patch > l.patch;
+    if (r.build != l.build) return r.build > l.build;
+    return false;
+}
+
+void startUpdateDownload() {
+    {
+        std::lock_guard<std::mutex> lk(g_updateMutex);
+        if (g_updateInfo.isDownloading || g_updateInfo.downloadUrl.empty()) return;
+        g_updateInfo.isDownloading = true;
+        g_updateInfo.statusText = "Скачивание обновления " + g_updateInfo.latestVersion + "...";
+    }
+
+    std::thread([]() {
+        std::string downloadUrl;
+        std::string latestVersion;
+        {
+            std::lock_guard<std::mutex> lk(g_updateMutex);
+            downloadUrl = g_updateInfo.downloadUrl;
+            latestVersion = g_updateInfo.latestVersion;
+        }
+
+        char currentExePath[MAX_PATH];
+        GetModuleFileNameA(NULL, currentExePath, MAX_PATH);
+
+        std::string newExePath = std::string(currentExePath) + ".new";
+        std::string oldExePath = std::string(currentExePath) + ".old";
+
+        std::string token = getGitHubAuthToken();
+        if (downloadFileWithRedirects(downloadUrl, newExePath, token)) {
+            {
+                std::lock_guard<std::mutex> lk(g_updateMutex);
+                g_updateInfo.statusText = "Установка и перезапуск...";
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(800));
+
+            DeleteFileA(oldExePath.c_str());
+            MoveFileA(currentExePath, oldExePath.c_str());
+            MoveFileA(newExePath.c_str(), currentExePath);
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+            STARTUPINFOA si = { sizeof(STARTUPINFOA) };
+            PROCESS_INFORMATION pi = {};
+            std::string quotedCmd = "\"" + std::string(currentExePath) + "\"";
+            if (CreateProcessA(NULL, (LPSTR)quotedCmd.c_str(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+            }
+            exit(0);
+        } else {
+            std::lock_guard<std::mutex> lk(g_updateMutex);
+            g_updateInfo.isDownloading = false;
+            g_updateInfo.statusText = "Ошибка загрузки файла. Попробуйте позже.";
+        }
+    }).detach();
+}
+
 void checkAutoUpdate() {
     { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "checking"; }
 
@@ -492,6 +636,11 @@ void checkAutoUpdate() {
         {"User-Agent", "RolsTraker-AutoUpdater"},
         {"Accept", "application/vnd.github.v3+json"}
     };
+
+    std::string token = getGitHubAuthToken();
+    if (!token.empty()) {
+        headers["Authorization"] = "token " + token;
+    }
 
     auto res = httpRequest("GET", "api.github.com", 443, "/repos/" + GITHUB_REPO + "/releases/latest", headers, "", true, false);
 
@@ -502,44 +651,38 @@ void checkAutoUpdate() {
 
     try {
         auto release = json::parse(res.body);
-        std::string latestVersion = release["tag_name"].get<std::string>();
+        std::string latestVersion = release.value("tag_name", "");
+        std::string releaseName = release.value("name", latestVersion);
+        std::string releaseNotes = release.value("body", "");
 
-        if (latestVersion != CURRENT_VERSION) {
+        if (!latestVersion.empty() && isNewerVersion(latestVersion, CURRENT_VERSION)) {
             std::string downloadUrl = "";
-            for (const auto& asset : release["assets"]) {
-                std::string name = asset["name"].get<std::string>();
-                if (name == "RolsTraker.exe") {
-                    downloadUrl = asset["browser_download_url"].get<std::string>();
-                    break;
+            if (release.contains("assets") && release["assets"].is_array()) {
+                for (const auto& asset : release["assets"]) {
+                    std::string name = asset.value("name", "");
+                    if (name == "RolsTraker.exe") {
+                        if (!token.empty() && asset.contains("url") && asset["url"].is_string()) {
+                            downloadUrl = asset["url"].get<std::string>();
+                        } else {
+                            downloadUrl = asset.value("browser_download_url", "");
+                        }
+                        break;
+                    }
                 }
             }
 
             if (!downloadUrl.empty()) {
-                { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "downloading " + latestVersion; }
-
-                char currentExePath[MAX_PATH];
-                GetModuleFileNameA(NULL, currentExePath, MAX_PATH);
-
-                std::string newExePath = std::string(currentExePath) + ".new";
-                std::string oldExePath = std::string(currentExePath) + ".old";
-
-                if (downloadFileWithRedirects(downloadUrl, newExePath)) {
-                    DeleteFileA(oldExePath.c_str());
-                    MoveFileA(currentExePath, oldExePath.c_str());
-                    MoveFileA(newExePath.c_str(), currentExePath);
-
-                    { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "restarting"; }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-
-                    STARTUPINFOA si = { sizeof(STARTUPINFOA) };
-                    PROCESS_INFORMATION pi = {};
-                    std::string quotedCmd = "\"" + std::string(currentExePath) + "\"";
-                    if (CreateProcessA(NULL, (LPSTR)quotedCmd.c_str(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-                        CloseHandle(pi.hProcess);
-                        CloseHandle(pi.hThread);
-                    }
-                    exit(0);
-                }
+                std::lock_guard<std::mutex> lk(g_updateMutex);
+                g_updateInfo.available = true;
+                g_updateInfo.latestVersion = latestVersion;
+                g_updateInfo.releaseTitle = releaseName;
+                g_updateInfo.releaseNotes = releaseNotes;
+                g_updateInfo.downloadUrl = downloadUrl;
+                g_updateInfo.isDownloading = false;
+                g_updateInfo.statusText = "";
+                g_updateStatus = "available " + latestVersion;
+                g_showUpdateModal = true;
+                return;
             }
         }
     } catch (...) {}
@@ -924,6 +1067,7 @@ std::map<std::string, std::string> getAgentMap() {
     }
     if (agents.empty()) {
         agents = {
+            {"ddd5a15c-4fbe-42fa-3789-11a55ca5ee04", "Hush"},
             {"e370fa57-4757-3604-3648-499e1f642d3f", "Gekko"},
             {"dade69b4-4f5a-8528-247b-219e5a1facd6", "Fade"},
             {"5f8d3a7f-467b-97f3-062c-13acf203c006", "Breach"},
@@ -1969,21 +2113,27 @@ static std::wstring urlOpenCommand(const std::wstring& progId) {
     return cmd;
 }
 
-static std::wstring substituteUrl(const std::wstring& cmdTemplate, const std::wstring& quotedUrl) {
+static std::wstring substituteUrl(const std::wstring& cmdTemplate, const std::wstring& rawUrl) {
     std::wstring out;
-    out.reserve(cmdTemplate.size() + quotedUrl.size());
+    out.reserve(cmdTemplate.size() + rawUrl.size() + 8);
     bool replaced = false;
     for (size_t i = 0; i < cmdTemplate.size(); ++i) {
         if (cmdTemplate[i] == L'%' && i + 1 < cmdTemplate.size() &&
             (cmdTemplate[i + 1] == L'1' || cmdTemplate[i + 1] == L'l' || cmdTemplate[i + 1] == L'L')) {
-            out += quotedUrl;
+            out += rawUrl;
             ++i;
             replaced = true;
         } else {
             out += cmdTemplate[i];
         }
     }
-    if (!replaced) out += L" " + quotedUrl;
+    if (!replaced) {
+        if (cmdTemplate.find(L"--single-argument") != std::wstring::npos) {
+            out += L" " + rawUrl;
+        } else {
+            out += L" \"" + rawUrl + L"\"";
+        }
+    }
     return out;
 }
 
@@ -2022,7 +2172,7 @@ static bool launchUrlInBrowser(const std::string& url) {
         std::wstring cmd = urlOpenCommand(progId);
         if (cmd.empty()) continue;
         cmd = expandEnv(cmd);
-        if (startDetachedProcess(substituteUrl(cmd, quotedUrl))) {
+        if (startDetachedProcess(substituteUrl(cmd, wideUrl))) {
             Log("Opened URL via registered handler (" + std::string(progId.begin(), progId.end()) + ")");
             return true;
         }
@@ -3377,8 +3527,8 @@ int main() {
 
     // Set console buffer cols and lines
     Log("Setting console mode");
-    int conCols = 92;
-    int conLines = 32;
+    int conCols = 120;
+    int conLines = 31;
     std::string modeCmd = "mode con cols=" + std::to_string(conCols) + " lines=" + std::to_string(conLines);
     system(modeCmd.c_str());
     
@@ -3879,6 +4029,13 @@ int main() {
                 safeOwnedAgents = g_ownedAgents;
             }
 
+            if (g_showUpdateModal) {
+                try {
+                    return renderUpdateModal();
+                } catch (...) {
+                    g_showUpdateModal = false;
+                }
+            }
             if (g_showPostMatch) {
                 auto now = std::chrono::steady_clock::now();
                 auto elapsedSec = std::chrono::duration_cast<std::chrono::seconds>(now - g_postMatchStartTime).count();
@@ -3930,14 +4087,14 @@ int main() {
                     g_currentView = AppView::MAIN;
                 }
             }
-            if (g_currentView == AppView::REPORT) {
+            if (false) {
                 try {
                     return renderReportEnemyMenu(safeMatchState, safeSession, agentMap);
                 } catch (...) {
                     g_currentView = AppView::MAIN;
                 }
             }
-            if (g_currentView == AppView::CHAT) {
+            if (false) {
                 try {
                     return renderChatMenu();
                 } catch (...) {
@@ -3967,8 +4124,48 @@ int main() {
             return true; 
         }
 
+        if (g_showUpdateModal) {
+            if (event == ftxui::Event::Return || 
+                (event.is_character() && (event.character() == "y" || event.character() == "Y" || 
+                                          event.character() == "\xd0\xbd" || event.character() == "\xd0\x9d"))) {
+                startUpdateDownload();
+                return true;
+            }
+            if (event == ftxui::Event::Escape || 
+                (event.is_character() && (event.character() == "n" || event.character() == "N" || 
+                                          event.character() == "\xd1\x82" || event.character() == "\xd0\xa2"))) {
+                g_showUpdateModal = false;
+                return true;
+            }
+            if (event.is_mouse()) {
+                g_mouseX = event.mouse().x;
+                g_mouseY = event.mouse().y;
+                if (event.mouse().button == ftxui::Mouse::Left) {
+                    if (event.mouse().motion == ftxui::Mouse::Pressed) {
+                        g_mousePressed = true;
+                        if (g_updateNowBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "update_now";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            startUpdateDownload();
+                            return true;
+                        }
+                        if (g_updateLaterBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "update_later";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            g_showUpdateModal = false;
+                            return true;
+                        }
+                    } else if (event.mouse().motion == ftxui::Mouse::Released) {
+                        g_mousePressed = false;
+                    }
+                }
+                return true;
+            }
+            return true;
+        }
+
         // Only when in CHAT view: allow typing into input field, Backspace and Return
-        if (g_currentView == AppView::CHAT) {
+        if (false) {
             if (event == ftxui::Event::Return) {
                 if (!g_chatInputText.empty()) {
                     sendValorantChatMessage(g_chatInputText, g_chatTargetChannel, &screen);
@@ -4065,20 +4262,10 @@ int main() {
             }
 
             if (g_currentView == AppView::MAIN) {
-                // Check "Match Chat" button
-                if (g_chatOpenBox.Contain(event.mouse().x, event.mouse().y)) {
-                    g_activeButton = "chat_open";
+                if (g_updateBadgeBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "update_badge";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();
-                    g_currentView = AppView::CHAT;
-                    return true;
-                }
-
-                // Check "Report Enemies" button
-                if (g_reportOpenBox.Contain(event.mouse().x, event.mouse().y)) {
-                    g_activeButton = "report_open";
-                    g_lastButtonClickTime = std::chrono::steady_clock::now();
-                    g_reportStatusMsg = "";
-                    g_currentView = AppView::REPORT;
+                    g_showUpdateModal = true;
                     return true;
                 }
 
@@ -4279,7 +4466,7 @@ int main() {
                         return true;
                     }
                 }
-            } else if (g_currentView == AppView::CHAT) {
+            } else if (false) {
                 if (g_chatCloseBox.Contain(event.mouse().x, event.mouse().y)) {
                     g_activeButton = "chat_close";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();
@@ -4314,7 +4501,7 @@ int main() {
                     }
                     return true;
                 }
-            } else if (g_currentView == AppView::REPORT) {
+            } else if (false) {
                 if (g_reportCloseBox.Contain(event.mouse().x, event.mouse().y)) {
                     g_activeButton = "report_close";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();

@@ -26,8 +26,27 @@ extern std::map<std::string, ftxui::Box> g_playerBoxes;
 extern ftxui::Box g_myStatsBox;
 extern int g_mouseX;
 extern int g_mouseY;
+#ifndef UPDATE_INFO_DEFINED
+#define UPDATE_INFO_DEFINED
+struct UpdateInfo {
+    bool available = false;
+    std::string latestVersion;
+    std::string releaseTitle;
+    std::string releaseNotes;
+    std::string downloadUrl;
+    bool isDownloading = false;
+    std::string statusText;
+};
+#endif
+
+extern UpdateInfo g_updateInfo;
 extern std::string g_updateStatus;
 extern std::mutex g_updateMutex;
+extern bool g_showUpdateModal;
+extern ftxui::Box g_updateNowBox;
+extern ftxui::Box g_updateLaterBox;
+extern ftxui::Box g_updateBadgeBox;
+void startUpdateDownload();
 extern std::string g_penaltiesStatus;
 extern std::mutex g_penaltiesMutex;
 extern ftxui::Box g_dodgeButtonBox;
@@ -268,14 +287,7 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
             nameParts.push_back(ftxui::text(" [ПРИМОРДИУМ]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::bgcolor(ftxui::Color::RGB(55, 15, 10)));
         }
 
-        // Smurf & Booster detection
-        bool isSmurfKd = (p.kdRatio >= 1.4f && p.matchesPlayed >= 5 && !p.isPrivate && ((float)p.matchesWon / p.matchesPlayed >= 0.55f));
-        if (isSmurfKd) {
-            nameParts.push_back(ftxui::text(" [SMURF]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
-        }
-        if (p.isBooster) {
-            nameParts.push_back(ftxui::text(" [БУСТЕР]") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
-        }
+        // Smurf & Booster detection (disabled)
 
         nameElement = ftxui::hbox(nameParts) | ftxui::reflect(g_playerBoxes[p.puuid]);
         if (g_playerBoxes.count(p.puuid) && g_playerBoxes[p.puuid].Contain(g_mouseX, g_mouseY)) {
@@ -341,6 +353,120 @@ inline ftxui::Element buildUpdateElement(const std::string& updateStatus) {
         : (ftxui::text(updateText) | ftxui::color(updateColor) | ftxui::center);
 }
 
+inline ftxui::Element renderUpdateModal() {
+    UpdateInfo info;
+    {
+        std::lock_guard<std::mutex> lk(g_updateMutex);
+        info = g_updateInfo;
+    }
+
+    std::vector<ftxui::Element> notesElements;
+    std::string notes = info.releaseNotes;
+    if (notes.empty()) {
+        notes = "Описание изменений в этой версии не указано.";
+    }
+
+    std::stringstream ss(notes);
+    std::string line;
+    int lineCount = 0;
+    while (std::getline(ss, line) && lineCount < 12) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        if (line.empty()) continue;
+
+        if (line.rfind("###", 0) == 0 || line.rfind("##", 0) == 0 || line.rfind("#", 0) == 0) {
+            std::string headerText = line;
+            size_t p = headerText.find_first_not_of("# ");
+            if (p != std::string::npos) headerText = headerText.substr(p);
+            notesElements.push_back(ftxui::text(" ▶ " + headerText) | ftxui::bold | ftxui::color(ftxui::Color::CyanLight));
+            lineCount++;
+        } else if (line.rfind("-", 0) == 0 || line.rfind("*", 0) == 0) {
+            std::string itemText = line.substr(1);
+            size_t p = itemText.find_first_not_of(" ");
+            if (p != std::string::npos) itemText = itemText.substr(p);
+            notesElements.push_back(ftxui::hbox({
+                ftxui::text("  • ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight),
+                ftxui::paragraph(itemText) | ftxui::color(ftxui::Color::White)
+            }));
+            lineCount++;
+        } else {
+            notesElements.push_back(ftxui::paragraph("    " + line) | ftxui::color(ftxui::Color::GrayLight));
+            lineCount++;
+        }
+    }
+    if (notesElements.empty()) {
+        notesElements.push_back(ftxui::text("    Нет дополнительной информации.") | ftxui::color(ftxui::Color::GrayDark));
+    }
+
+    ftxui::Element actionArea;
+    if (info.isDownloading) {
+        static auto start_time_spin = std::chrono::steady_clock::now();
+        int frame = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time_spin).count() / 100;
+        actionArea = ftxui::vbox({
+            ftxui::text(""),
+            ftxui::hbox({
+                ftxui::filler(),
+                circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan),
+                ftxui::text("  " + (info.statusText.empty() ? "Скачивание обновления..." : info.statusText)) | ftxui::bold | ftxui::color(ftxui::Color::YellowLight),
+                ftxui::filler()
+            }),
+            ftxui::text("")
+        });
+    } else {
+        auto updateBtn = renderButton("ОБНОВИТЬ СЕЙЧАС", g_updateNowBox, ftxui::Color::GreenLight, "update_now", g_mousePressed)
+                       | ftxui::reflect(g_updateNowBox);
+        auto laterBtn = renderButton("НАПОМНИТЬ ПОЗЖЕ", g_updateLaterBox, ftxui::Color::GrayLight, "update_later", g_mousePressed)
+                      | ftxui::reflect(g_updateLaterBox);
+
+        actionArea = ftxui::vbox({
+            ftxui::text(""),
+            ftxui::hbox({
+                ftxui::filler(),
+                updateBtn,
+                ftxui::text("    "),
+                laterBtn,
+                ftxui::filler()
+            }),
+            ftxui::text(""),
+            ftxui::text(" [ENTER / Y] Обновить  •  [ESC / N] Напомнить позже ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
+            ftxui::text("")
+        });
+    }
+
+    auto card = ftxui::vbox({
+        ftxui::text(""),
+        ftxui::text(" 🚀 ДОСТУПНО НОВОЕ ОБНОВЛЕНИЕ ") | ftxui::bold | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::GreenLight) | ftxui::center,
+        ftxui::text(""),
+        ftxui::hbox({
+            ftxui::filler(),
+            ftxui::text("Текущая версия: ") | ftxui::color(ftxui::Color::GrayLight),
+            ftxui::text(CURRENT_VERSION) | ftxui::bold | ftxui::color(ftxui::Color::White),
+            ftxui::text("  ➜  Новая версия: ") | ftxui::color(ftxui::Color::GrayLight),
+            ftxui::text(info.latestVersion) | ftxui::bold | ftxui::color(ftxui::Color::YellowLight),
+            ftxui::filler()
+        }),
+        (!info.releaseTitle.empty() ? (ftxui::text("« " + info.releaseTitle + " »") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::center) : ftxui::text("")),
+        ftxui::text(""),
+        ftxui::separator(),
+        ftxui::text(" ЧТО ДОБАВИЛИ / ИЗМЕНИЛИ: ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight),
+        ftxui::text(""),
+        ftxui::vbox(std::move(notesElements)) | ftxui::borderStyled(ftxui::ROUNDED, ftxui::Color::GrayDark) | ftxui::bgcolor(ftxui::Color::RGB(15, 18, 26)),
+        actionArea
+    })
+    | ftxui::bgcolor(ftxui::Color::RGB(10, 14, 20))
+    | ftxui::borderStyled(ftxui::DOUBLE, ftxui::Color::Cyan)
+    | ftxui::size(ftxui::WIDTH, ftxui::EQUAL, 78);
+
+    return ftxui::vbox({
+        ftxui::filler(),
+        ftxui::hbox({
+            ftxui::filler(),
+            card,
+            ftxui::filler()
+        }),
+        ftxui::filler()
+    });
+}
+
 inline ftxui::Element renderFTXUI(const MatchState& state, const Session& session, const Lockfile& lock, const std::map<std::string, std::string>& agentMap, const std::map<std::string, std::string>& mapNameMap) {
     std::string updateStatus;
     { std::lock_guard<std::mutex> lk(g_updateMutex); updateStatus = g_updateStatus; }
@@ -370,25 +496,21 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         auto myStatsBtn = renderButton("Моя статистика (Tracker.gg)", g_myStatsBox, ftxui::Color::CyanLight, "my_stats", g_mousePressed)
                         | ftxui::reflect(g_myStatsBox);
 
-        auto reportBtn = renderButton("⚠ РЕПОРТ ВРАГОВ", g_reportOpenBox, ftxui::Color::RedLight, "report_open", g_mousePressed)
-                       | ftxui::reflect(g_reportOpenBox);
-
-        auto chatBtn = renderButton("ЧАТ МАТЧА", g_chatOpenBox, ftxui::Color::GreenLight, "chat_open", g_mousePressed)
-                     | ftxui::reflect(g_chatOpenBox);
+        auto updateBanner = g_updateInfo.available ? ftxui::vbox({
+            renderButton("🚀 Доступно обновление " + g_updateInfo.latestVersion + " (посмотреть изменения)", g_updateBadgeBox, ftxui::Color::GreenLight, "update_badge", g_mousePressed) | ftxui::reflect(g_updateBadgeBox) | ftxui::center,
+            ftxui::text("")
+        }) : ftxui::text("");
 
         return ftxui::vbox({
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
             ftxui::filler(),
             updateElem,
+            updateBanner,
             ftxui::text(" Ожидание начала матча... ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
             text(""),
             ftxui::hbox({
-                myStatsBtn,
-                ftxui::text("  "),
-                reportBtn,
-                ftxui::text("  "),
-                chatBtn
+                myStatsBtn
             }) | ftxui::center,
             ftxui::text(""),
             ftxui::text(" [F11 / M] Развернуть на весь экран | [Q] Выход ") | ftxui::color(ftxui::Color::GrayDark) | ftxui::center,
@@ -502,8 +624,10 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         ftxui::text(" "),
         header,
         ftxui::filler() | ftxui::flex,
-        ftxui::text(" [F11/M] На весь экран ") | ftxui::color(ftxui::Color::YellowLight),
-        ftxui::text(" [Q] Выход ") | ftxui::color(ftxui::Color::GrayLight)
+        (g_updateInfo.available ? (
+            renderButton("🚀 Доступно обновление " + g_updateInfo.latestVersion, g_updateBadgeBox, ftxui::Color::GreenLight, "update_badge", g_mousePressed)
+            | ftxui::reflect(g_updateBadgeBox)
+        ) : ftxui::text(""))
     }));
     uiElements.push_back(ftxui::separator());
 
@@ -543,10 +667,6 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         ) : ftxui::text("")),
         ftxui::filler() | ftxui::flex,
         renderButton("Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
-        ftxui::text("  "),
-        renderButton("ЧАТ МАТЧА", g_chatOpenBox, ftxui::Color::GreenLight, "chat_open", g_mousePressed) | ftxui::reflect(g_chatOpenBox),
-        ftxui::text("  "),
-        renderButton("⚠ РЕПОРТ ВРАГОВ", g_reportOpenBox, ftxui::Color::RedLight, "report_open", g_mousePressed) | ftxui::reflect(g_reportOpenBox),
         ftxui::filler() | ftxui::flex,
         (!penaltiesStatus.empty() ? ftxui::text(penaltiesStatus) | ftxui::bold | ftxui::color(ftxui::Color::RedLight) : ftxui::text(""))
     }));

@@ -20,6 +20,7 @@ struct AgentPickerItem {
 inline const std::vector<AgentPickerItem>& getStaticAgentList() {
     static const std::vector<AgentPickerItem> list = {
         // Дуэлянты
+        {"ddd5a15c-4fbe-42fa-3789-11a55ca5ee04", "Hush", "Дуэлянт"},
         {"add6443a-41bd-e414-f6ad-e58d267f4e95", "Jett", "Дуэлянт"},
         {"a3bfb853-43b2-7238-a4f1-ad90e9e46bcc", "Reyna", "Дуэлянт"},
         {"f94c3b30-42be-e959-889c-5aa313dba261", "Raze", "Дуэлянт"},

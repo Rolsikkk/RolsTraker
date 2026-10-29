@@ -112,16 +112,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         })
     };
 
-    if (g_selectedPlayerInfo.isBooster) {
-        std::string bText = " [ ВНИМАНИЕ: ВОЗМОЖНЫЙ БУСТЕР — ";
-        if (g_selectedPlayerInfo.customSkinCount >= 0) {
-            bText += "ВСЕГО " + std::to_string(g_selectedPlayerInfo.customSkinCount) + " ИЗ 19 СКИНОВ В ИНВЕНТАРЕ";
-        } else {
-            bText += "МАЛО СКИНОВ В ИНВЕНТАРЕ";
-        }
-        bText += " ] ";
-        headerItems.push_back(text(bText) | bold | color(Color::RedLight) | bgcolor(Color::RGB(70, 15, 15)) | center);
-    }
+
 
     if (g_selectedPlayerInfo.detectedPartySize >= 2) {
         std::string pText = " [ В ПАЧКЕ: " + g_selectedPlayerInfo.detectedPartyLabel;
