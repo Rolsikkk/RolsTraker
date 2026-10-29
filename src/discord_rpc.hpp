@@ -51,7 +51,7 @@ inline void updateDiscordPresence(std::string state, std::string details) {
                 {"state", state},
                 {"details", details},
                 {"timestamps", {{"start", s_discordStartTime}}},
-                {"assets", {{"large_image", "valorant"}, {"large_text", "RolsTraker"}}}
+                {"assets", {{"large_image", "valorant"}, {"large_text", "RolsTracker"}}}
             }}
         }},
         {"nonce", "1"}

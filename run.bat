@@ -1,7 +1,12 @@
 @echo off
 chcp 65001 > nul
-title RolsTraker
-if exist build\RolsTraker.exe copy /y build\RolsTraker.exe RolsTraker.exe > nul
+title RolsTracker
+if exist build\RolsTracker.exe copy /y build\RolsTracker.exe RolsTracker.exe > nul
+if exist build\RolsTracker.exe copy /y build\RolsTracker.exe RolsTraker.exe > nul
 cls
-RolsTraker.exe
+if exist RolsTracker.exe (
+    RolsTracker.exe
+) else (
+    RolsTraker.exe
+)
 pause

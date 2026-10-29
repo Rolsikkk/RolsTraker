@@ -1,8 +1,8 @@
-# RolsTraker 🎯
+# RolsTracker 🎯
 
 ![C++](https://img.shields.io/badge/C++-20-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Version](https://img.shields.io/github/v/release/Rolsikkk/RolsTraker)
+![Version](https://img.shields.io/github/v/release/Rolsikkk/RolsTracker)
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6.svg)
 
 [🇺🇸 English](#english) | [🇷🇺 Русский](#русский)
@@ -34,9 +34,9 @@ A lightning-fast, portable, terminal-based **Valorant stats tracker and lobby co
 4. **Data Aggregation**: Retrieves player PUUIDs, queries competitive tiers, and fetches Tracker.gg statistics asynchronously.
 
 ### 📥 Download & Usage
-1. Download the latest `RolsTraker.zip` or `RolsTraker.exe` from the [Releases](https://github.com/Rolsikkk/RolsTraker/releases/latest) page.
+1. Download the latest `RolsTracker.zip` or `RolsTracker.exe` from the [Releases](https://github.com/Rolsikkk/RolsTracker/releases/latest) page.
 2. Extract the files and ensure Valorant is running.
-3. Launch `RolsTraker.exe` — enjoy real-time lobby intelligence!
+3. Launch `RolsTracker.exe` — enjoy real-time lobby intelligence!
 
 ---
 
@@ -65,9 +65,9 @@ A lightning-fast, portable, terminal-based **Valorant stats tracker and lobby co
 4. **Сбор статистики**: Получает PUUID игроков, опрашивает ранги и подгружает точные показатели с Tracker.gg.
 
 ### 📥 Установка и запуск
-1. Скачайте свежий архив `RolsTraker.zip` или файл `RolsTraker.exe` со страницы [Релизов](https://github.com/Rolsikkk/RolsTraker/releases/latest).
+1. Скачайте свежий архив `RolsTracker.zip` или файл `RolsTracker.exe` со страницы [Релизов](https://github.com/Rolsikkk/RolsTracker/releases/latest).
 2. Запустите Valorant.
-3. Запустите `RolsTraker.exe`.
+3. Запустите `RolsTracker.exe`.
 
 ---
 
@@ -75,4 +75,4 @@ A lightning-fast, portable, terminal-based **Valorant stats tracker and lobby co
 
 Если вам понравилась программа, не забудьте поставить звёздочку! ⭐ / If you like this project, please star the repository! ⭐
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Rolsikkk/RolsTraker&type=Date)](https://star-history.com/#Rolsikkk/RolsTraker&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Rolsikkk/RolsTracker&type=Date)](https://star-history.com/#Rolsikkk/RolsTracker&Date)

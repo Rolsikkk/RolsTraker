@@ -40,8 +40,8 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.2.9";
-const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
+const std::string CURRENT_VERSION = "v3.3.0";
+const std::string GITHUB_REPO     = "Rolsikkk/RolsTracker";
 
 struct PlayerStats {
     float kdRatio = -1.0f;
@@ -654,7 +654,7 @@ void checkAutoUpdate() {
     { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "checking"; }
 
     std::map<std::string, std::string> headers = {
-        {"User-Agent", "RolsTraker-AutoUpdater"},
+        {"User-Agent", "RolsTracker-AutoUpdater"},
         {"Accept", "application/vnd.github.v3+json"}
     };
 
@@ -681,7 +681,7 @@ void checkAutoUpdate() {
             if (release.contains("assets") && release["assets"].is_array()) {
                 for (const auto& asset : release["assets"]) {
                     std::string name = asset.value("name", "");
-                    if (name == "RolsTraker.exe") {
+                    if (name == "RolsTracker.exe" || name == "RolsTraker.exe") {
                         if (!token.empty() && asset.contains("url") && asset["url"].is_string()) {
                             downloadUrl = asset["url"].get<std::string>();
                         } else {
@@ -3560,7 +3560,7 @@ static HWND getTopLevelConsoleWindow() {
             char title[512] = {0};
             GetWindowTextA(hwnd, title, sizeof(title));
             std::string t(title);
-            if (t.find("RolsTraker") != std::string::npos || t.find("rolstraker") != std::string::npos) {
+            if (t.find("RolsTracker") != std::string::npos || t.find("rolstracker") != std::string::npos || t.find("RolsTraker") != std::string::npos || t.find("rolstraker") != std::string::npos) {
                 p->exactHwnd = hwnd;
                 return FALSE; // Exact match found!
             }
@@ -3611,7 +3611,7 @@ static void applyOptimalWindowSize() {
 }
 
 int main() {
-    SetConsoleTitleA("RolsTraker");
+    SetConsoleTitleA("RolsTracker");
     Log("Starting main()");
     SetUnhandledExceptionFilter(logUnhandledException);
     std::set_terminate(logTerminateHandler);
