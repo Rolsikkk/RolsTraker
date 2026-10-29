@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.3.7";
+const std::string CURRENT_VERSION = "v3.3.8";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -2385,7 +2385,7 @@ void openTrackerInBrowser(std::string gName, std::string tLine) {
 #include "ftxui_report_menu.hpp"
 #include "ftxui_chat_menu.hpp"
 
-PlayerProfileTab g_playerProfileTab = PlayerProfileTab::SKINS;
+PlayerProfileTab g_playerProfileTab = PlayerProfileTab::STATS;
 ftxui::Box g_tabSkinsBox;
 ftxui::Box g_tabStatsBox;
 std::map<std::string, PlayerWeaponLoadout> g_playerLoadouts;
@@ -4765,7 +4765,7 @@ int main() {
                         g_selectedPlayerInfo.statsSource = sc.source;
                         g_selectedPlayerInfo.isLoading = false;
                     }
-                    g_playerProfileTab = PlayerProfileTab::SKINS;
+                    g_playerProfileTab = PlayerProfileTab::STATS;
                     g_selectedSkinWeaponUuid = "";
                     fetchPlayerLoadoutDirect(session, session.puuid);
                     g_currentView = AppView::PLAYER_STATS;
@@ -4821,7 +4821,7 @@ int main() {
                                 break;
                             }
                         }
-                        g_playerProfileTab = PlayerProfileTab::SKINS;
+                        g_playerProfileTab = PlayerProfileTab::STATS;
                         g_selectedSkinWeaponUuid = "";
                         fetchPlayerLoadoutDirect(session, puuid);
                         g_currentView = AppView::PLAYER_STATS;

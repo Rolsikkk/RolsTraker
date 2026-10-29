@@ -102,16 +102,40 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     }
     auto trackerBadge = text(badgeText) | bold | color(badgeColor) | border;
 
-    RankDisplay curRank = formatRank(g_selectedPlayerInfo.rankTier, g_selectedPlayerInfo.rankRR, g_selectedPlayerInfo.peakRankTier, g_selectedPlayerInfo.peakRankRR);
-    RankDisplay pkRank = formatRank(g_selectedPlayerInfo.peakRankTier, g_selectedPlayerInfo.peakRankRR);
+    int pTier = g_selectedPlayerInfo.rankTier;
+    int pRR = g_selectedPlayerInfo.rankRR;
+    int pPeakTier = g_selectedPlayerInfo.peakRankTier;
+    int pPeakRR = g_selectedPlayerInfo.peakRankRR;
 
-    Color curRankCol = getRankColorFTX(g_selectedPlayerInfo.rankTier > 2 ? g_selectedPlayerInfo.rankTier : g_selectedPlayerInfo.peakRankTier);
-    Color pkRankCol = getRankColorFTX(g_selectedPlayerInfo.peakRankTier);
+    if (pTier == 0 && !g_selectedPuuid.empty() && g_rankCache.count(g_selectedPuuid)) {
+        pTier = g_rankCache[g_selectedPuuid].tier;
+        pRR = g_rankCache[g_selectedPuuid].rr;
+        pPeakTier = g_rankCache[g_selectedPuuid].peakTier;
+        pPeakRR = g_rankCache[g_selectedPuuid].peakRR;
+    }
+
+    std::string eloStr = "";
+    if (pTier >= 3) {
+        int elo = (pTier - 2) * 100 + pRR;
+        eloStr = std::to_string(elo) + " ELO";
+    } else if (pPeakTier >= 3) {
+        int peakElo = (pPeakTier - 2) * 100 + pPeakRR;
+        eloStr = "Unrated [Пик: " + std::to_string(peakElo) + " ELO]";
+    } else {
+        eloStr = "Калибровка";
+    }
+
+    RankDisplay curRank = formatRank(pTier, pRR, pPeakTier, pPeakRR);
+    RankDisplay pkRank = formatRank(pPeakTier, pPeakRR);
+
+    Color curRankCol = getRankColorFTX(pTier > 2 ? pTier : pPeakTier);
+    Color pkRankCol = getRankColorFTX(pPeakTier);
 
     Elements headerItems = {
         hbox({
             text(" Игрок: ") | bold | color(Color::GrayLight),
             nameTitle,
+            text("  [ " + curRank.name + (!eloStr.empty() ? " • " + eloStr : "") + " ]") | bold | color(curRankCol),
             filler(),
             trackerBadge
         })
@@ -178,12 +202,13 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
                 bodyArt
             }) | flex,
             separator(),
-            // Right column: Ranks
+            // Right column: Ranks & Hidden MMR
             vbox({
-                text(" РАНГИ (RIOT COMPETITIVE)") | bold | color(Color::Green),
+                text(" РАНГИ И MMR") | bold | color(Color::Green),
                 separator(),
-                hbox(text(" Текущий: ") | color(Color::GrayLight), text(curRank.name) | color(curRankCol) | bold),
-                hbox(text(" Пиковый: ") | color(Color::GrayLight), text(pkRank.name) | color(pkRankCol) | bold)
+                hbox(text(" Текущий:     ") | color(Color::GrayLight), text(curRank.name) | color(curRankCol) | bold),
+                hbox(text(" Пиковый:     ") | color(Color::GrayLight), text(pkRank.name) | color(pkRankCol) | bold),
+                hbox(text(" Скрытый MMR: ") | color(Color::GrayLight), text(eloStr) | color(Color::CyanLight) | bold)
             }) | flex
         }),
         separator(),
