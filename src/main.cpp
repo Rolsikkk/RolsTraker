@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.3.6";
+const std::string CURRENT_VERSION = "v3.3.7";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -3683,7 +3683,7 @@ int main() {
     std::set_terminate(logTerminateHandler);
     loadSettings();
     Log("Settings loaded");
-    if (!g_discordClientId.empty()) { initDiscordRpc(g_discordClientId); updateDiscordPresence("В приложении", "RolsTracker"); Log("Discord RPC init done"); }
+    if (!g_discordClientId.empty()) { initDiscordRpc(g_discordClientId); updateDiscordPresence("В приложении", "rolstracker.3fun.workers.dev"); Log("Discord RPC init done"); }
     
     // Set optimal vertical / portrait window size (1080x1920 screen or primary monitor)
     HWND console = getTopLevelConsoleWindow();
@@ -3992,7 +3992,7 @@ int main() {
                                             }
                                         }
                                     }
-                                    updateDiscordPresence("В главном меню" + myRankInfo, "RolsTracker");
+                                    updateDiscordPresence("В главном меню" + myRankInfo, "rolstracker.3fun.workers.dev");
                                 }
                             }
                         }

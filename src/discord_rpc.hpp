@@ -43,15 +43,29 @@ inline void updateDiscordPresence(std::string state, std::string details) {
         s_lastDiscordState = state;
     }
 
+    std::string safeDetails = details;
+    if (safeDetails.empty() || safeDetails == "RolsTracker") {
+        safeDetails = "rolstracker.3fun.workers.dev";
+    }
+
     json activity = {
         {"cmd", "SET_ACTIVITY"},
         {"args", {
             {"pid", GetCurrentProcessId()},
             {"activity", {
                 {"state", state},
-                {"details", details},
+                {"details", safeDetails},
                 {"timestamps", {{"start", s_discordStartTime}}},
-                {"assets", {{"large_image", "https://raw.githubusercontent.com/Rolsikkk/RolsTraker/master/resources/icon.png"}, {"large_text", "RolsTracker 🎯"}}}
+                {"assets", {
+                    {"large_image", "https://raw.githubusercontent.com/Rolsikkk/RolsTraker/master/resources/icon.png"},
+                    {"large_text", "RolsTracker 🎯 | rolstracker.3fun.workers.dev"}
+                }},
+                {"buttons", json::array({
+                    {
+                        {"label", "Скачать RolsTracker 🚀"},
+                        {"url", "https://rolstracker.3fun.workers.dev"}
+                    }
+                })}
             }}
         }},
         {"nonce", "1"}

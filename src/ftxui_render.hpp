@@ -725,7 +725,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
     std::vector<ftxui::Element> uiElements;
     // Compact Top bar
     uiElements.push_back(ftxui::hbox({
-        ftxui::text(" ROLSTRACKER ") | ftxui::bold | ftxui::color(ftxui::Color::Cyan),
+        ftxui::text(" ROLSTRACKER ") | ftxui::bold | ftxui::color(ftxui::Color::White),
         ftxui::text("(" + CURRENT_VERSION + ") ") | ftxui::color(ftxui::Color::GrayDark),
         ftxui::separator(),
         ftxui::text(" "),
