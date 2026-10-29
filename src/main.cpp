@@ -25,6 +25,9 @@
 #include <tlhelp32.h>
 #include <filesystem>
 #include <exception>
+#include <shlobj.h>
+#include <shobjidl.h>
+#include <objbase.h>
 
 // FTXUI Headers
 #include <ftxui/dom/elements.hpp>
@@ -40,7 +43,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.3.8";
+const std::string CURRENT_VERSION = "v3.3.9";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -118,11 +121,58 @@ std::string getExeDir() {
     return ".";
 }
 
+// Modal & Dialog state boxes
+ftxui::Box g_hiddenLogBtnBox;
+bool g_showOpenLogModal = false;
+ftxui::Box g_openLogYesBox;
+ftxui::Box g_openLogNoBox;
+ftxui::Box g_openLogModalBox;
+
+bool g_showFirstRunModal = false;
+ftxui::Box g_firstRunOpt1Box;
+ftxui::Box g_firstRunOpt2Box;
+ftxui::Box g_firstRunModalBox;
+
+static bool g_setupCompleted = false;
+static std::string g_installMode = "portable";
+
+std::string getAppDataDir() {
+    char appData[MAX_PATH];
+    if (SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, appData) == S_OK) {
+        std::string dir = std::string(appData) + "\\RolsTracker";
+        CreateDirectoryA(dir.c_str(), NULL);
+        return dir;
+    }
+    return getExeDir();
+}
+
+std::string getSettingsPath() {
+    return getAppDataDir() + "\\settings.json";
+}
+
+std::string getLogFilePath() {
+    if (g_installMode == "appdata") {
+        char localApp[MAX_PATH];
+        if (SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localApp) == S_OK) {
+            std::string dir = std::string(localApp) + "\\Programs\\RolsTracker";
+            CreateDirectoryA(dir.c_str(), NULL);
+            return dir + "\\debug.log";
+        }
+    }
+    return getExeDir() + "\\debug.log";
+}
+
 void Log(const std::string& msg) {
     std::lock_guard<std::mutex> lk(g_logMutex);
-    std::ofstream ofs(getExeDir() + "\\debug.log", std::ios::app);
+    std::string path = getLogFilePath();
+    std::ofstream ofs(path, std::ios::app);
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    ofs << "[" << now << "] " << msg << "\n";
+    std::tm tm = {};
+    localtime_s(&tm, &now);
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
+    ofs << "[" << buf << "] " << msg << "\n";
+    ofs.flush();
 }
 
 static std::string g_discordClientId = "1558391767168978964";
@@ -131,7 +181,7 @@ static int g_windowHeight = 680;
 
 void saveSettings() {
     try {
-        std::string settingsPath = getExeDir() + "\\settings.json";
+        std::string settingsPath = getSettingsPath();
         json j;
         std::ifstream in(settingsPath);
         if (in.is_open()) {
@@ -140,6 +190,8 @@ void saveSettings() {
         j["discordClientId"] = g_discordClientId;
         j["windowWidth"] = g_windowWidth;
         j["windowHeight"] = g_windowHeight;
+        j["setupCompleted"] = g_setupCompleted;
+        j["installMode"] = g_installMode;
         std::ofstream out(settingsPath);
         if (out.is_open()) {
             out << j.dump(4);
@@ -149,7 +201,11 @@ void saveSettings() {
 
 void loadSettings() {
     try {
-        std::string settingsPath = getExeDir() + "\\settings.json";
+        std::string settingsPath = getSettingsPath();
+        if (!std::filesystem::exists(settingsPath)) {
+            std::string fallback = getExeDir() + "\\settings.json";
+            if (std::filesystem::exists(fallback)) settingsPath = fallback;
+        }
         std::ifstream f(settingsPath);
         if (f.is_open()) {
             json j;
@@ -163,9 +219,90 @@ void loadSettings() {
             if (j.contains("windowHeight") && j["windowHeight"].is_number_integer()) {
                 g_windowHeight = j["windowHeight"].get<int>();
             }
+            if (j.contains("setupCompleted") && j["setupCompleted"].is_boolean()) {
+                g_setupCompleted = j["setupCompleted"].get<bool>();
+            }
+            if (j.contains("installMode") && j["installMode"].is_string()) {
+                g_installMode = j["installMode"].get<std::string>();
+            }
         } else {
             saveSettings();
         }
+    } catch (...) {}
+}
+
+bool createDesktopShortcut(const std::string& targetExePath, const std::string& shortcutName = "RolsTracker.lnk") {
+    CoInitialize(NULL);
+    IShellLinkA* pShellLink = NULL;
+    HRESULT hr = CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLinkA, (void**)&pShellLink);
+    if (SUCCEEDED(hr)) {
+        pShellLink->SetPath(targetExePath.c_str());
+        size_t lastSlash = targetExePath.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+            pShellLink->SetWorkingDirectory(targetExePath.substr(0, lastSlash).c_str());
+        }
+        pShellLink->SetDescription("RolsTracker - Valorant Match Tracker & Stats");
+        pShellLink->SetIconLocation(targetExePath.c_str(), 0);
+
+        IPersistFile* pPersistFile = NULL;
+        hr = pShellLink->QueryInterface(IID_IPersistFile, (void**)&pPersistFile);
+        if (SUCCEEDED(hr)) {
+            char desktopPath[MAX_PATH];
+            if (SHGetFolderPathA(NULL, CSIDL_DESKTOPDIRECTORY, NULL, 0, desktopPath) == S_OK) {
+                std::string linkPath = std::string(desktopPath) + "\\" + shortcutName;
+                std::wstring wLinkPath(linkPath.begin(), linkPath.end());
+                pPersistFile->Save(wLinkPath.c_str(), TRUE);
+            }
+            pPersistFile->Release();
+        }
+        pShellLink->Release();
+    }
+    CoUninitialize();
+    return SUCCEEDED(hr);
+}
+
+void installToAppDataAndCreateShortcut() {
+    try {
+        char localApp[MAX_PATH];
+        if (SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localApp) != S_OK) {
+            return;
+        }
+        std::string targetDir = std::string(localApp) + "\\Programs\\RolsTracker";
+        CreateDirectoryA((std::string(localApp) + "\\Programs").c_str(), NULL);
+        CreateDirectoryA(targetDir.c_str(), NULL);
+
+        char currentExe[MAX_PATH];
+        GetModuleFileNameA(NULL, currentExe, MAX_PATH);
+
+        std::string targetExe = targetDir + "\\RolsTracker.exe";
+        CopyFileA(currentExe, targetExe.c_str(), FALSE);
+
+        createDesktopShortcut(targetExe, "RolsTracker.lnk");
+
+        g_installMode = "appdata";
+        g_setupCompleted = true;
+        saveSettings();
+        Log("Installed to AppData and created desktop shortcut: " + targetExe);
+    } catch (const std::exception& e) {
+        Log("installToAppData error: " + std::string(e.what()));
+    }
+}
+
+void runPortableMode() {
+    g_installMode = "portable";
+    g_setupCompleted = true;
+    saveSettings();
+    Log("Selected Portable Mode: running from " + getExeDir());
+}
+
+void openLogFolder() {
+    try {
+        std::string logFile = getLogFilePath();
+        if (!std::filesystem::exists(logFile)) {
+            Log("Log file created for viewer");
+        }
+        std::string cmd = "/select,\"" + logFile + "\"";
+        ShellExecuteA(NULL, "open", "explorer.exe", cmd.c_str(), NULL, SW_SHOWNORMAL);
     } catch (...) {}
 }
 
@@ -424,6 +561,7 @@ HttpResponse httpRequest(
 }
 
 bool downloadFileWithRedirects(const std::string& initialUrl, const std::string& outputPath, const std::string& authToken = "", std::function<void(int percent, size_t downloaded, size_t total)> progressCallback = nullptr) {
+    Log("[DOWNLOAD] Starting download from URL: " + initialUrl + " to " + outputPath);
     std::string currentUrl = initialUrl;
     for (int redirectCount = 0; redirectCount < 5; redirectCount++) {
         std::string host, path;
@@ -493,6 +631,7 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
                     } else {
                         currentUrl = newUrl;
                     }
+                    Log("[DOWNLOAD] Redirect " + std::to_string(redirectCount + 1) + " -> " + currentUrl + " (HTTP " + std::to_string(dwStatusCode) + ")");
                     WinHttpCloseHandle(hRequest);
                     WinHttpCloseHandle(hConnect);
                     WinHttpCloseHandle(hSession);
@@ -503,6 +642,7 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
 
         if (dwStatusCode == 200) {
             DWORD contentLength = 0;
+            Log("[DOWNLOAD] Connected successfully (HTTP 200)");
             DWORD dwLenSize = sizeof(contentLength);
             bool hasContentLength = WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &contentLength, &dwLenSize, WINHTTP_NO_HEADER_INDEX);
 
@@ -540,14 +680,17 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
             WinHttpCloseHandle(hRequest);
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
+            Log("[DOWNLOAD] Download finished. Total bytes: " + std::to_string(totalDownloaded));
             return (totalDownloaded > 0);
         }
 
+        Log("[DOWNLOAD] Download failed at URL: " + currentUrl + " with HTTP code: " + std::to_string(dwStatusCode) + " (LastError=" + std::to_string(GetLastError()) + ")");
         WinHttpCloseHandle(hRequest);
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         return false;
     }
+    Log("[DOWNLOAD] Download exceeded max redirects");
     return false;
 }
 
@@ -690,6 +833,7 @@ void startUpdateDownload() {
 
 void checkAutoUpdate() {
     { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "checking"; }
+    Log("[UPDATE] Checking for updates. Current version: " + CURRENT_VERSION);
 
     // 1. Primary check: Cloudflare Worker API
     try {
@@ -698,6 +842,7 @@ void checkAutoUpdate() {
             {"Accept", "application/json"}
         };
         auto cfRes = httpRequest("GET", "rolstracker.3fun.workers.dev", 443, "/api/version", cfHeaders, "", true, false);
+        Log("[UPDATE] Cloudflare Worker response: status=" + std::to_string(cfRes.statusCode) + ", body=" + cfRes.body);
         if (cfRes.statusCode == 200) {
             auto j = json::parse(cfRes.body);
             std::string latestVersion = j.value("version", j.value("tag_name", ""));
@@ -2601,12 +2746,13 @@ static void parseWeaponsJson(const std::string& jsonStr) {
 }
 
 static void initWeaponsDatabase() {
-    std::string cachePath = getExeDir() + "/weapons_cache.json";
+    std::string cachePath = getAppDataDir() + "\\weapons_cache.json";
     bool loadedFromDisk = false;
     
     std::ifstream f(cachePath);
     if (!f.is_open()) {
-        f.open("weapons_cache.json");
+        std::string fallback = getExeDir() + "\\weapons_cache.json";
+        f.open(fallback);
     }
     if (f.is_open()) {
         std::stringstream ss;
@@ -3682,7 +3828,10 @@ int main() {
     SetUnhandledExceptionFilter(logUnhandledException);
     std::set_terminate(logTerminateHandler);
     loadSettings();
-    Log("Settings loaded");
+    Log("Settings loaded (setupCompleted=" + std::string(g_setupCompleted ? "true" : "false") + ", mode=" + g_installMode + ")");
+    if (!g_setupCompleted) {
+        g_showFirstRunModal = true;
+    }
     if (!g_discordClientId.empty()) { initDiscordRpc(g_discordClientId); updateDiscordPresence("В приложении", "rolstracker.3fun.workers.dev"); Log("Discord RPC init done"); }
     
     // Set optimal vertical / portrait window size (1080x1920 screen or primary monitor)
@@ -4366,6 +4515,23 @@ int main() {
                 safeOwnedAgents = g_ownedAgents;
             }
 
+            if (g_showFirstRunModal) {
+                try {
+                    return renderFirstRunModal(g_mousePressed);
+                } catch (...) {
+                    g_showFirstRunModal = false;
+                }
+            }
+            if (g_showOpenLogModal) {
+                try {
+                    return ftxui::dbox({
+                        renderFTXUI(safeMatchState, safeSession, safeLock, agentMap, mapNameMap),
+                        renderOpenLogModal(g_mousePressed)
+                    });
+                } catch (...) {
+                    g_showOpenLogModal = false;
+                }
+            }
             if (g_showUpdateModal) {
                 try {
                     return renderUpdateModal();
@@ -4444,6 +4610,75 @@ int main() {
         // Block Ctrl+C from closing app
         if (event == ftxui::Event::Special("\x03") || (event.is_character() && event.character() == "\x03")) {
             return true; 
+        }
+
+        if (g_showFirstRunModal) {
+            if (event == ftxui::Event::Escape) {
+                runPortableMode();
+                g_showFirstRunModal = false;
+                return true;
+            }
+            if (event.is_mouse()) {
+                g_mouseX = event.mouse().x;
+                g_mouseY = event.mouse().y;
+                if (event.mouse().button == ftxui::Mouse::Left) {
+                    if (event.mouse().motion == ftxui::Mouse::Pressed) {
+                        g_mousePressed = true;
+                        if (g_firstRunOpt1Box.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "first_run_opt1";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            installToAppDataAndCreateShortcut();
+                            g_showFirstRunModal = false;
+                            return true;
+                        }
+                        if (g_firstRunOpt2Box.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "first_run_opt2";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            runPortableMode();
+                            g_showFirstRunModal = false;
+                            return true;
+                        }
+                    } else if (event.mouse().motion == ftxui::Mouse::Released) {
+                        g_mousePressed = false;
+                    }
+                }
+                return true;
+            }
+            return true;
+        }
+
+        if (g_showOpenLogModal) {
+            if (event == ftxui::Event::Escape) {
+                g_showOpenLogModal = false;
+                return true;
+            }
+            if (event.is_mouse()) {
+                g_mouseX = event.mouse().x;
+                g_mouseY = event.mouse().y;
+                if (event.mouse().button == ftxui::Mouse::Left) {
+                    if (event.mouse().motion == ftxui::Mouse::Pressed) {
+                        g_mousePressed = true;
+                        if (g_openLogYesBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "open_log_yes";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            g_showOpenLogModal = false;
+                            openLogFolder();
+                            return true;
+                        }
+                        if (g_openLogNoBox.Contain(event.mouse().x, event.mouse().y) ||
+                            !g_openLogModalBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "open_log_no";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            g_showOpenLogModal = false;
+                            return true;
+                        }
+                    } else if (event.mouse().motion == ftxui::Mouse::Released) {
+                        g_mousePressed = false;
+                    }
+                }
+                return true;
+            }
+            return true;
         }
 
         if (g_showUpdateModal) {
@@ -4602,6 +4837,10 @@ int main() {
             }
 
             if (g_currentView == AppView::MAIN) {
+                if (g_hiddenLogBtnBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_showOpenLogModal = true;
+                    return true;
+                }
                 if (g_updateBadgeBox.Contain(event.mouse().x, event.mouse().y)) {
                     g_activeButton = "update_badge";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();

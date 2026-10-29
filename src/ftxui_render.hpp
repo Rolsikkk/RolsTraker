@@ -74,6 +74,19 @@ extern std::set<std::string> g_ownedAgents;
 extern ftxui::Box g_reportOpenBox;
 extern ftxui::Box g_chatOpenBox;
 
+extern ftxui::Box g_hiddenLogBtnBox;
+extern bool g_showOpenLogModal;
+extern ftxui::Box g_openLogYesBox;
+extern ftxui::Box g_openLogNoBox;
+extern ftxui::Box g_openLogModalBox;
+
+extern bool g_showFirstRunModal;
+extern ftxui::Box g_firstRunOpt1Box;
+extern ftxui::Box g_firstRunOpt2Box;
+extern ftxui::Box g_firstRunModalBox;
+
+std::string getLogFilePath();
+
 struct PostMatchInfo {
     std::string matchId = "";
     int tierAfter = 0;
@@ -92,8 +105,9 @@ extern std::chrono::steady_clock::time_point g_postMatchStartTime;
 // Animated button renderer with idle, hover, pressed, and click animation
 inline ftxui::Element renderButton(const std::string& text, const ftxui::Box& box, ftxui::Color baseColor, const std::string& btnId, bool isPressed) {
     bool isSkinModalActive = (g_currentView == AppView::PLAYER_STATS && !g_selectedSkinWeaponUuid.empty());
+    bool isModalActive = isSkinModalActive || g_showOpenLogModal || g_showFirstRunModal;
     bool hovered = box.Contain(g_mouseX, g_mouseY);
-    if (isSkinModalActive && btnId != "skin_modal_close") {
+    if (isModalActive && btnId != "skin_modal_close" && btnId != "open_log_yes" && btnId != "open_log_no" && btnId != "first_run_opt1" && btnId != "first_run_opt2") {
         hovered = false;
     }
     bool pressed = hovered && isPressed;
@@ -431,6 +445,94 @@ inline ftxui::Element buildUpdateElement(const std::string& updateStatus) {
         : (ftxui::text(updateText) | ftxui::color(updateColor) | ftxui::center);
 }
 
+inline ftxui::Element renderOpenLogModal(bool isPressed) {
+    using namespace ftxui;
+
+    auto yesBtn = renderButton(" ДА ", g_openLogYesBox, Color::GreenLight, "open_log_yes", isPressed) | reflect(g_openLogYesBox);
+    auto noBtn = renderButton(" НЕТ ", g_openLogNoBox, Color::GrayLight, "open_log_no", isPressed) | reflect(g_openLogNoBox);
+
+    std::string lPath = getLogFilePath();
+
+    auto card = vbox(Elements{
+        text(" 📁 ЖУРНАЛ ЛОГОВ (DEBUG.LOG) ") | bold | color(Color::YellowLight) | center,
+        separator(),
+        text(""),
+        text(" Открыть папку с log файлом? ") | bold | color(Color::White) | center,
+        text(""),
+        text(" Расположение файла: ") | color(Color::GrayLight) | center,
+        text(" " + lPath + " ") | color(Color::CyanLight) | center,
+        text(""),
+        separator(),
+        text(""),
+        hbox(Elements{
+            filler(),
+            yesBtn,
+            text("        "),
+            noBtn,
+            filler()
+        }),
+        text("")
+    })
+    | bgcolor(Color::Black)
+    | clear_under
+    | borderStyled(ftxui::BorderStyle::DOUBLE, Color::Cyan)
+    | size(WIDTH, GREATER_THAN, 54)
+    | size(WIDTH, LESS_THAN, 80)
+    | reflect(g_openLogModalBox);
+
+    return vbox(Elements{
+        filler(),
+        hbox(Elements{ filler(), card, filler() }),
+        filler()
+    });
+}
+
+inline ftxui::Element renderFirstRunModal(bool isPressed) {
+    using namespace ftxui;
+
+    auto opt1Btn = renderButton("1. Установить в AppData + Ярлык на Рабочем столе", g_firstRunOpt1Box, Color::GreenLight, "first_run_opt1", isPressed) | reflect(g_firstRunOpt1Box);
+    auto opt2Btn = renderButton("2. Сразу запустить (Портативный режим)", g_firstRunOpt2Box, Color::CyanLight, "first_run_opt2", isPressed) | reflect(g_firstRunOpt2Box);
+
+    auto card = vbox(Elements{
+        text(" 🚀 ДОБРО ПОЖАЛОВАТЬ В ROLSTRACKER ") | bold | color(Color::CyanLight) | center,
+        separator(),
+        text(""),
+        text(" Выберите способ запуска программы: ") | bold | color(Color::White) | center,
+        text(""),
+        vbox(Elements{
+            opt1Btn | center,
+            text(""),
+            text("    • Создастся отдельная папка в AppData") | color(Color::GrayLight),
+            text("    • На Рабочем столе создастся ярлык с белым логотипом") | color(Color::GrayLight),
+            text("    • Рабочие файлы будут спрятаны и не засорят рабочий стол") | color(Color::GrayLight),
+            text(""),
+            separator(),
+            text(""),
+            opt2Btn | center,
+            text(""),
+            text("    • Программа запустится прямо из текущей папки") | color(Color::GrayLight),
+            text("    • Рядом с exe будет создаваться только один лог (debug.log)") | color(Color::GrayLight),
+            text("")
+        }) | size(WIDTH, GREATER_THAN, 62),
+        separator(),
+        text(""),
+        text(" [ Кликните по нужному варианту для продолжения ] ") | color(Color::GrayDark) | center,
+        text("")
+    })
+    | bgcolor(Color::Black)
+    | clear_under
+    | borderStyled(ftxui::BorderStyle::DOUBLE, Color::Green)
+    | size(WIDTH, GREATER_THAN, 68)
+    | size(WIDTH, LESS_THAN, 86)
+    | reflect(g_firstRunModalBox);
+
+    return vbox(Elements{
+        filler(),
+        hbox(Elements{ filler(), card, filler() }),
+        filler()
+    });
+}
+
 inline ftxui::Element renderUpdateModal() {
     UpdateInfo info;
     {
@@ -622,6 +724,10 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
                 ftxui::text(" ⛔ " + penaltiesStatus + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center
             }) : ftxui::text("")),
             ftxui::filler(),
+            ftxui::hbox({
+                ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox),
+                ftxui::filler()
+            })
         });
     }
 
@@ -783,6 +889,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
     uiElements.push_back(ftxui::separator());
     uiElements.push_back(ftxui::hbox({
+        ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox),
         (state.phase == "pregame" ? (
             !g_dodgeConfirm
             ? ftxui::hbox({

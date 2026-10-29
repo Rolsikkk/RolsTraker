@@ -10,7 +10,7 @@ add_subdirectory(third_party/ftxui)
 
 add_executable(RolsTracker src/main.cpp app.rc)
 
-target_link_libraries(RolsTracker PRIVATE ftxui::screen ftxui::dom ftxui::component winhttp ws2_32 crypt32)
+target_link_libraries(RolsTracker PRIVATE ftxui::screen ftxui::dom ftxui::component winhttp ws2_32 crypt32 ole32 uuid shell32)
 
 if(WIN32)
     target_link_options(RolsTracker PRIVATE -static -static-libgcc -static-libstdc++)
