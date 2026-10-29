@@ -373,21 +373,6 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     auto backBtn = renderButton("Назад", g_backButtonBox, Color::CyanLight, "back", g_mousePressed) | reflect(g_backButtonBox);
     auto trackerBtn = renderButton("Открыть Tracker.gg", g_openTrackerBox, Color::GreenLight, "open_tracker", g_mousePressed) | reflect(g_openTrackerBox);
 
-    std::string fullName = g_selectedPlayerInfo.gameName + (g_selectedPlayerInfo.tagLine.empty() ? "" : "#" + g_selectedPlayerInfo.tagLine);
-    ftxui::Element nameTitle = text(fullName) | bold | color(Color::White);
-    if (g_selectedPlayerInfo.isMuted) {
-        nameTitle = hbox(nameTitle, text(" [В МУТЕ]") | color(Color::RedLight) | bold);
-    }
-
-    std::string pStatus;
-    { std::lock_guard<std::mutex> lk(g_penaltiesMutex); pStatus = g_penaltiesStatus; }
-    if (g_selectedPuuid == g_localPuuid && !pStatus.empty()) {
-        nameTitle = vbox(nameTitle, text(pStatus) | color(Color::RedLight) | bold);
-    }
-
-    RankDisplay curRank = formatRank(g_selectedPlayerInfo.rankTier, g_selectedPlayerInfo.rankRR, g_selectedPlayerInfo.peakRankTier, g_selectedPlayerInfo.peakRankRR);
-    Color curRankCol = getRankColorFTX(g_selectedPlayerInfo.rankTier > 2 ? g_selectedPlayerInfo.rankTier : g_selectedPlayerInfo.peakRankTier);
-
     // Group weapons into categories
     std::vector<WeaponSkinInfo> sidearms;
     std::vector<WeaponSkinInfo> smgs;
@@ -425,16 +410,33 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     std::sort(heavies.begin(), heavies.end(), sortFn);
     std::sort(melee.begin(), melee.end(), sortFn);
 
+    std::string fullName = g_selectedPlayerInfo.gameName + (g_selectedPlayerInfo.tagLine.empty() ? "" : "#" + g_selectedPlayerInfo.tagLine);
+    bool noSkins = (loadout.loaded && customCount == 0) || (g_selectedPlayerInfo.skinsLoaded && g_selectedPlayerInfo.customSkinCount == 0);
+    ftxui::Color nameCol = noSkins ? Color::RedLight : Color::White;
+    ftxui::Element nameTitle = text(fullName) | bold | color(nameCol);
+    if (g_selectedPlayerInfo.isMuted) {
+        nameTitle = hbox(Elements{ nameTitle, text(" [В МУТЕ]") | color(Color::RedLight) | bold });
+    }
+
+    std::string pStatus;
+    { std::lock_guard<std::mutex> lk(g_penaltiesMutex); pStatus = g_penaltiesStatus; }
+    if (g_selectedPuuid == g_localPuuid && !pStatus.empty()) {
+        nameTitle = vbox(Elements{ nameTitle, text(pStatus) | color(Color::RedLight) | bold });
+    }
+
+    RankDisplay curRank = formatRank(g_selectedPlayerInfo.rankTier, g_selectedPlayerInfo.rankRR, g_selectedPlayerInfo.peakRankTier, g_selectedPlayerInfo.peakRankRR);
+    Color curRankCol = getRankColorFTX(g_selectedPlayerInfo.rankTier > 2 ? g_selectedPlayerInfo.rankTier : g_selectedPlayerInfo.peakRankTier);
+
     Element skinsBody;
     if (!loadout.loaded && loadout.weapons.empty()) {
-        skinsBody = vbox({
+        skinsBody = vbox(Elements{
             text(""),
             text(" Получение данных об экипированных скинах из матча... ") | color(Color::CyanLight) | bold | center,
             text(" (Скины считываются из активного лобби Riot Client API) ") | color(Color::GrayLight) | center,
             text("")
         }) | border;
     } else {
-        auto leftCol = vbox({
+        auto leftCol = vbox(Elements{
             renderCategorySection("ПИСТОЛЕТЫ", Color::Cyan, sidearms),
             text(""),
             renderCategorySection("ПИСТОЛЕТЫ-ПУЛЕМЁТЫ", Color::MagentaLight, smgs),
@@ -442,7 +444,7 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
             renderCategorySection("ДРОБОВИКИ", Color::RedLight, shotguns),
         }) | border | flex;
 
-        auto rightCol = vbox({
+        auto rightCol = vbox(Elements{
             renderCategorySection("ВИНТОВКИ", Color::GreenLight, rifles),
             text(""),
             renderCategorySection("СНАЙПЕРСКИЕ ВИНТОВКИ", Color::BlueLight, snipers),
@@ -452,7 +454,7 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
             renderCategorySection("ХОЛОДНОЕ ОРУЖИЕ", Color::Gold1, melee),
         }) | border | flex;
 
-        skinsBody = hbox({
+        skinsBody = hbox(Elements{
             leftCol,
             separator(),
             rightCol
@@ -471,15 +473,15 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
 
     Element selectedBar = text("");
     if (selWsi) {
-        selectedBar = hbox({
+        selectedBar = hbox(Elements{
             text(" ▸ Выбран скин: ") | bold | color(Color::CyanLight),
             text(selWsi->fullName) | bold | color(Color::YellowLight),
             text(" (кликните ещё раз или нажмите ESC чтобы закрыть)") | color(Color::GrayLight)
         }) | center | borderStyled(ROUNDED, Color::Cyan) | bgcolor(Color::RGB(15, 25, 35));
     }
 
-    auto headerBox = vbox({
-        hbox({
+    auto headerBox = vbox(Elements{
+        hbox(Elements{
             text(" Игрок: ") | bold | color(Color::GrayLight),
             nameTitle,
             text("  [ " + curRank.name + " ]") | bold | color(curRankCol),
@@ -487,17 +489,17 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
             text(" [ КОЛЛЕКЦИЯ СКИНОВ В ИГРЕ ] ") | bold | color(Color::CyanLight) | border
         }),
         separator(),
-        hbox({
+        hbox(Elements{
             renderProfileTabs(PlayerProfileTab::SKINS),
             filler(),
             g_selectedPlayerInfo.hasKuronami
-                ? (hbox({ text(" [ КУРОНАМИ: " + (g_selectedPlayerInfo.kuronamiWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.kuronamiWeapon) + " ] ") | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 65)), text(" ") }))
+                ? (hbox(Elements{ text(" [ КУРОНАМИ: " + (g_selectedPlayerInfo.kuronamiWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.kuronamiWeapon) + " ] ") | bold | color(Color::CyanLight) | bgcolor(Color::RGB(15, 45, 65)), text(" ") }))
                 : text(""),
             g_selectedPlayerInfo.hasNocturnum
-                ? (hbox({ text(" [ ОСТРИЁ ТЬМЫ: " + (g_selectedPlayerInfo.nocturnumWeapon.empty() ? "ФАНТОМ" : g_selectedPlayerInfo.nocturnumWeapon) + " ] ") | bold | color(Color::MagentaLight) | bgcolor(Color::RGB(55, 10, 45)), text(" ") }))
+                ? (hbox(Elements{ text(" [ ОСТРИЁ ТЬМЫ: " + (g_selectedPlayerInfo.nocturnumWeapon.empty() ? "ФАНТОМ" : g_selectedPlayerInfo.nocturnumWeapon) + " ] ") | bold | color(Color::MagentaLight) | bgcolor(Color::RGB(55, 10, 45)), text(" ") }))
                 : text(""),
             g_selectedPlayerInfo.hasPrimordium
-                ? (hbox({ text(" [ ПЕРВОНАЧАЛО: " + (g_selectedPlayerInfo.primordiumWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.primordiumWeapon) + " ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(65, 20, 10)), text(" ") }))
+                ? (hbox(Elements{ text(" [ ПЕРВОНАЧАЛО: " + (g_selectedPlayerInfo.primordiumWeapon.empty() ? "ВАНДАЛ/ФАНТОМ" : g_selectedPlayerInfo.primordiumWeapon) + " ] ") | bold | color(Color::RedLight) | bgcolor(Color::RGB(65, 20, 10)), text(" ") }))
                 : text(""),
 
             text(" Особых скинов: " + std::to_string(customCount) + " из " + std::to_string(std::min(19, std::max(19, totalWeapons))) + " ") | color((loadout.loaded && customCount <= 2) ? Color::RedLight : Color::YellowLight) | bold
@@ -509,13 +511,13 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
         bottomArea.push_back(selectedBar);
         bottomArea.push_back(text(""));
     }
-    bottomArea.push_back(hbox({
+    bottomArea.push_back(hbox(Elements{
         backBtn,
         text("   "),
         trackerBtn
     }) | center);
 
-    auto contentBox = vbox({
+    auto contentBox = vbox(Elements{
         headerBox,
         separator(),
         skinsBody,
@@ -523,12 +525,12 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
         vbox(std::move(bottomArea))
     }) | border;
 
-    Element rootElement = vbox({
+    Element rootElement = vbox(Elements{
         contentBox | size(WIDTH, GREATER_THAN, 80) | size(WIDTH, LESS_THAN, 110) | center
     });
 
     if (selWsi) {
-        return dbox({
+        return dbox(Elements{
             rootElement,
             renderSkinDetailModal(*selWsi)
         });

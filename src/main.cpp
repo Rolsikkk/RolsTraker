@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.2.3";
+const std::string CURRENT_VERSION = "v3.2.4";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -3996,8 +3996,10 @@ int main() {
                 {
                     std::lock_guard<std::mutex> lkLoad(g_loadoutsMutex);
                     for (auto& p : matchState.players) {
-                        if (g_playerLoadouts.count(p.puuid)) {
-                            const auto& pl = g_playerLoadouts[p.puuid];
+                        std::string pIdLow = p.puuid;
+                        for (auto& c : pIdLow) c = tolower(c);
+                        if (g_playerLoadouts.count(p.puuid) || g_playerLoadouts.count(pIdLow)) {
+                            const auto& pl = g_playerLoadouts.count(p.puuid) ? g_playerLoadouts[p.puuid] : g_playerLoadouts[pIdLow];
                             if (pl.loaded) {
                                 int cCount = 0;
                                 bool kFound = false;

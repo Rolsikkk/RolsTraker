@@ -253,10 +253,15 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
 
         ftxui::Element nameElement;
         std::vector<ftxui::Element> nameParts;
+
+        bool hasNoSkins = (p.skinsLoaded && p.customSkinCount == 0);
+
         if (!p.isConnected || !p.connectionStatus.empty()) {
             std::string statusStr = !p.connectionStatus.empty() ? p.connectionStatus : "[AFK]";
             nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
             nameParts.push_back(ftxui::text(statusStr) | ftxui::bold | ftxui::inverted | ftxui::color(ftxui::Color::Red));
+        } else if (hasNoSkins) {
+            nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
         } else if ((p.hasKuronami ? 1 : 0) + (p.hasNocturnum ? 1 : 0) + (p.hasPrimordium ? 1 : 0) >= 2) {
             nameParts.push_back(ftxui::text(" " + fullName + " ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight) | ftxui::bgcolor(ftxui::Color::RGB(40, 20, 50)));
         } else if (p.hasKuronami) {

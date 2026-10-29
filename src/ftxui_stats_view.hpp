@@ -18,7 +18,9 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
     auto trackerBtn = renderButton("Открыть Tracker.gg", g_openTrackerBox, Color::GreenLight, "open_tracker", g_mousePressed) | reflect(g_openTrackerBox);
     
     std::string fullName = g_selectedPlayerInfo.gameName + (g_selectedPlayerInfo.tagLine.empty() ? "" : "#" + g_selectedPlayerInfo.tagLine);
-    ftxui::Element nameTitle = text(fullName) | bold | color(Color::White);
+    bool noSkins = (g_selectedPlayerInfo.skinsLoaded && g_selectedPlayerInfo.customSkinCount == 0);
+    ftxui::Color nameCol = noSkins ? Color::RedLight : Color::White;
+    ftxui::Element nameTitle = text(fullName) | bold | color(nameCol);
     if (g_selectedPlayerInfo.isMuted) {
         nameTitle = hbox(nameTitle, text(" [ В МУТЕ ]") | color(Color::RedLight) | bold);
     }
