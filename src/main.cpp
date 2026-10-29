@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.2.4";
+const std::string CURRENT_VERSION = "v3.2.5";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -2618,6 +2618,29 @@ static WeaponSkinInfo resolveWeaponSkin(const std::string& weaponUuid, const std
     return wsi;
 }
 
+static bool getPlayerLoadout(const std::string& puuid, PlayerWeaponLoadout& out) {
+    if (puuid.empty()) return false;
+    std::string low = puuid;
+    for (auto& c : low) c = tolower(c);
+    std::string up = puuid;
+    for (auto& c : up) c = toupper(c);
+
+    std::lock_guard<std::mutex> lk(g_loadoutsMutex);
+    if (g_playerLoadouts.count(puuid) && g_playerLoadouts[puuid].loaded) {
+        out = g_playerLoadouts[puuid];
+        return true;
+    }
+    if (g_playerLoadouts.count(low) && g_playerLoadouts[low].loaded) {
+        out = g_playerLoadouts[low];
+        return true;
+    }
+    if (g_playerLoadouts.count(up) && g_playerLoadouts[up].loaded) {
+        out = g_playerLoadouts[up];
+        return true;
+    }
+    return false;
+}
+
 static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Session& session) {
     try {
         auto j = json::parse(jsonBody);
@@ -2661,23 +2684,41 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
                         if (!isPlayableWeapon(weaponId)) continue;
                         std::string skinId = "";
                         std::string chromaId = "";
-                        if (itemObj.contains("Sockets") && itemObj["Sockets"].is_object()) {
-                            for (const auto& [sockKey, sockVal] : itemObj["Sockets"].items()) {
-                                std::string sId = sockKey;
-                                if (sockVal.contains("ID") && sockVal["ID"].is_string()) {
-                                    sId = sockVal["ID"].get<std::string>();
+                        if (itemObj.contains("Sockets")) {
+                            if (itemObj["Sockets"].is_object()) {
+                                for (const auto& [sockKey, sockVal] : itemObj["Sockets"].items()) {
+                                    std::string sId = sockKey;
+                                    if (sockVal.contains("ID") && sockVal["ID"].is_string()) {
+                                        sId = sockVal["ID"].get<std::string>();
+                                    }
+                                    std::string itemId = "";
+                                    if (sockVal.contains("Item") && sockVal["Item"].is_object() && sockVal["Item"].contains("ID") && sockVal["Item"]["ID"].is_string()) {
+                                        itemId = sockVal["Item"]["ID"].get<std::string>();
+                                    }
+                                    if (_stricmp(sId.c_str(), "bcef87d6-209b-46c6-8b19-fbe40bd95abc") == 0) {
+                                        skinId = itemId;
+                                    } else if (_stricmp(sId.c_str(), "3ad1b2b2-acdb-4524-852f-954a76ddae0a") == 0) {
+                                        chromaId = itemId;
+                                    }
                                 }
-                                std::string itemId = "";
-                                if (sockVal.contains("Item") && sockVal["Item"].contains("ID") && sockVal["Item"]["ID"].is_string()) {
-                                    itemId = sockVal["Item"]["ID"].get<std::string>();
-                                }
-                                if (sId == "bcef87d6-209b-46c6-8b19-fbe40bd95abc" || sockKey == "bcef87d6-209b-46c6-8b19-fbe40bd95abc") {
-                                    skinId = itemId;
-                                } else if (sId == "3ad1b2b2-acdb-4524-852f-954a76ddae0a" || sockKey == "3ad1b2b2-acdb-4524-852f-954a76ddae0a") {
-                                    chromaId = itemId;
+                            } else if (itemObj["Sockets"].is_array()) {
+                                for (const auto& sockVal : itemObj["Sockets"]) {
+                                    std::string sId = getJsonKeyStr(sockVal, {"ID", "id"});
+                                    std::string itemId = "";
+                                    if (sockVal.contains("Item") && sockVal["Item"].is_object()) {
+                                        itemId = getJsonKeyStr(sockVal["Item"], {"ID", "id"});
+                                    }
+                                    if (_stricmp(sId.c_str(), "bcef87d6-209b-46c6-8b19-fbe40bd95abc") == 0) {
+                                        skinId = itemId;
+                                    } else if (_stricmp(sId.c_str(), "3ad1b2b2-acdb-4524-852f-954a76ddae0a") == 0) {
+                                        chromaId = itemId;
+                                    }
                                 }
                             }
                         }
+                        if (skinId.empty()) skinId = getJsonKeyStr(itemObj, {"SkinID", "skinId"});
+                        if (chromaId.empty()) chromaId = getJsonKeyStr(itemObj, {"ChromaID", "chromaId"});
+
                         std::string canonWeaponUuid = weaponId;
                         for (const auto& dw : DEFAULT_WEAPONS) {
                             if (_stricmp(dw.uuid.c_str(), weaponId.c_str()) == 0) {
@@ -2693,9 +2734,13 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
                 {
                     std::string sLower = subject;
                     for (auto& c : sLower) c = tolower(c);
+                    std::string sUpper = subject;
+                    for (auto& c : sUpper) c = toupper(c);
+
                     std::lock_guard<std::mutex> lk(g_loadoutsMutex);
                     g_playerLoadouts[subject] = pLoadout;
                     g_playerLoadouts[sLower] = pLoadout;
+                    g_playerLoadouts[sUpper] = pLoadout;
                 }
             }
         }
@@ -2731,8 +2776,15 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
             }
 
             {
+                std::string sLower = subject;
+                for (auto& c : sLower) c = tolower(c);
+                std::string sUpper = subject;
+                for (auto& c : sUpper) c = toupper(c);
+
                 std::lock_guard<std::mutex> lk(g_loadoutsMutex);
                 g_playerLoadouts[subject] = pLoadout;
+                g_playerLoadouts[sLower] = pLoadout;
+                g_playerLoadouts[sUpper] = pLoadout;
             }
         }
     } catch (...) {}
@@ -2804,24 +2856,28 @@ static void updateMatchLoadouts(const Session& session, const MatchState& state)
     if (matchChanged) {
         std::lock_guard<std::mutex> lk(g_loadoutsMutex);
         g_playerLoadouts.clear();
+        g_lastLoadedMatchId = state.matchId;
     }
+
     bool allLoaded = true;
-    {
-        std::lock_guard<std::mutex> lk(g_loadoutsMutex);
-        for (const auto& p : state.players) {
-            if (!p.puuid.empty() && (!g_playerLoadouts.count(p.puuid) || !g_playerLoadouts[p.puuid].loaded)) {
-                allLoaded = false;
-                break;
-            }
+    int playersWithPuuid = 0;
+    for (const auto& p : state.players) {
+        if (p.puuid.empty()) continue;
+        playersWithPuuid++;
+        PlayerWeaponLoadout dummy;
+        if (!getPlayerLoadout(p.puuid, dummy)) {
+            allLoaded = false;
         }
     }
 
-    if (!matchChanged && allLoaded) return;
-    if (!matchChanged && std::chrono::duration_cast<std::chrono::seconds>(now - g_lastLoadoutFetchTime).count() < 3) {
+    if (playersWithPuuid > 0 && allLoaded && !matchChanged) {
         return;
     }
 
-    g_lastLoadedMatchId = state.matchId;
+    if (!matchChanged && std::chrono::duration_cast<std::chrono::seconds>(now - g_lastLoadoutFetchTime).count() < 2) {
+        return;
+    }
+
     g_lastLoadoutFetchTime = now;
     std::string matchId = state.matchId;
     std::string phase = state.phase;
@@ -3488,53 +3544,27 @@ static void applyOptimalWindowSize() {
             HWND console = getTopLevelConsoleWindow();
             if (!console) continue;
 
-            struct EnumMonData {
-                RECT targetRect;
-                bool foundPortrait = false;
-            } emd;
-            
-            EnumDisplayMonitors(NULL, NULL, [](HMONITOR hMon, HDC, LPRECT, LPARAM dwData) -> BOOL {
-                auto* pData = reinterpret_cast<EnumMonData*>(dwData);
-                MONITORINFO mi = { sizeof(mi) };
-                if (GetMonitorInfoA(hMon, &mi)) {
-                    int w = mi.rcWork.right - mi.rcWork.left;
-                    int h = mi.rcWork.bottom - mi.rcWork.top;
-                    // Portrait monitor (width ~1080, height ~1920)
-                    if (w <= 1200 && h >= 1600) {
-                        pData->targetRect = mi.rcWork;
-                        pData->foundPortrait = true;
-                        return FALSE;
-                    }
-                }
-                return TRUE;
-            }, reinterpret_cast<LPARAM>(&emd));
-
             int targetW = g_windowWidth > 0 ? g_windowWidth : 1080;
             int targetH = g_windowHeight > 0 ? g_windowHeight : 680;
-            int startX = 20, startY = 20;
 
-            if (emd.foundPortrait) {
-                int workW = emd.targetRect.right - emd.targetRect.left;
-                int workH = emd.targetRect.bottom - emd.targetRect.top;
-                targetW = std::min(targetW, workW - 20);
-                targetH = std::min(targetH, workH - 40);
-                startX = emd.targetRect.left + (workW - targetW) / 2;
-                startY = emd.targetRect.top + 30;
-            } else {
-                HMONITOR hMon = MonitorFromWindow(console, MONITOR_DEFAULTTONEAREST);
-                MONITORINFO mi = { sizeof(mi) };
-                if (GetMonitorInfoA(hMon, &mi)) {
-                    int workW = mi.rcWork.right - mi.rcWork.left;
-                    int workH = mi.rcWork.bottom - mi.rcWork.top;
-                    targetW = std::min(targetW, workW - 20);
-                    targetH = std::min(targetH, workH - 40);
-                    startX = mi.rcWork.left + (workW - targetW) / 2;
-                    startY = mi.rcWork.top + (workH - targetH) / 2;
+            HMONITOR hMon = MonitorFromWindow(console, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO mi = { sizeof(mi) };
+            if (GetMonitorInfoA(hMon, &mi)) {
+                RECT curRect;
+                if (GetWindowRect(console, &curRect)) {
+                    int newX = curRect.left;
+                    int newY = curRect.top;
+                    // Only adjust if overflowing work area boundaries
+                    if (newX + targetW > mi.rcWork.right) {
+                        newX = std::max((int)mi.rcWork.left, (int)mi.rcWork.right - targetW);
+                    }
+                    if (newY + targetH > mi.rcWork.bottom) {
+                        newY = std::max((int)mi.rcWork.top, (int)mi.rcWork.bottom - targetH);
+                    }
+                    MoveWindow(console, newX, newY, targetW, targetH, TRUE);
+                    SetWindowPos(console, NULL, newX, newY, targetW, targetH, SWP_NOZORDER | SWP_SHOWWINDOW);
                 }
             }
-
-            MoveWindow(console, startX, startY, targetW, targetH, TRUE);
-            SetWindowPos(console, HWND_TOP, startX, startY, targetW, targetH, SWP_SHOWWINDOW);
         }
     }).detach();
 }
@@ -3996,10 +4026,8 @@ int main() {
                 {
                     std::lock_guard<std::mutex> lkLoad(g_loadoutsMutex);
                     for (auto& p : matchState.players) {
-                        std::string pIdLow = p.puuid;
-                        for (auto& c : pIdLow) c = tolower(c);
-                        if (g_playerLoadouts.count(p.puuid) || g_playerLoadouts.count(pIdLow)) {
-                            const auto& pl = g_playerLoadouts.count(p.puuid) ? g_playerLoadouts[p.puuid] : g_playerLoadouts[pIdLow];
+                        PlayerWeaponLoadout pl;
+                        if (getPlayerLoadout(p.puuid, pl)) {
                             if (pl.loaded) {
                                 int cCount = 0;
                                 bool kFound = false;
@@ -4114,25 +4142,10 @@ int main() {
                 try {
                     if (g_playerProfileTab == PlayerProfileTab::SKINS) {
                         PlayerWeaponLoadout pLoadout;
-                        {
-                            std::lock_guard<std::mutex> lk(g_loadoutsMutex);
-                            if (g_playerLoadouts.count(g_selectedPuuid)) {
-                                pLoadout = g_playerLoadouts[g_selectedPuuid];
-                            }
-                        }
-                        if (pLoadout.weapons.empty()) {
-                            for (const auto& dw : DEFAULT_WEAPONS) {
-                                WeaponSkinInfo wsi;
-                                wsi.weaponUuid = dw.uuid;
-                                wsi.weaponName = dw.name;
-                                wsi.category = dw.category;
-                                wsi.categoryOrder = dw.catOrder;
-                                wsi.weaponOrder = dw.weaponOrder;
-                                wsi.skinName = "Стандартный " + dw.name;
-                                wsi.fullName = wsi.skinName;
-                                wsi.isCustom = false;
-                                pLoadout.weapons[dw.uuid] = wsi;
-                            }
+                        bool foundPl = getPlayerLoadout(g_selectedPuuid, pLoadout);
+                        if (!foundPl) {
+                            pLoadout.puuid = g_selectedPuuid;
+                            pLoadout.loaded = false;
                         }
                         return renderPlayerSkins(pLoadout);
                     }
