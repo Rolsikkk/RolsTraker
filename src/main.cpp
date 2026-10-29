@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.3.0";
+const std::string CURRENT_VERSION = "v3.3.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -3824,6 +3824,70 @@ int main() {
                                 auto owned = getOwnedAgents(newSession);
                                 std::lock_guard<std::recursive_mutex> lk(g_mutex);
                                 g_ownedAgents = owned;
+                            }).detach();
+                        }
+
+                        static bool s_localMmrFetched = false;
+                        if (!s_localMmrFetched && !newSession.puuid.empty()) {
+                            s_localMmrFetched = true;
+                            std::string myPuuid = newSession.puuid;
+                            Session mySess = newSession;
+                            std::thread([mySess, myPuuid]() {
+                                std::string clientPlatform = getClientPlatformBase64();
+                                std::map<std::string, std::string> pdHeaders = {
+                                    {"Authorization", "Bearer " + mySess.accessToken},
+                                    {"X-Riot-Entitlements-JWT", mySess.token},
+                                    {"X-Riot-ClientPlatform", clientPlatform},
+                                    {"X-Riot-ClientVersion", mySess.clientVersion}
+                                };
+                                auto mmrRes = httpRequest("GET", mySess.pdHost, 443, "/mmr/v1/players/" + myPuuid, pdHeaders, "", true, false);
+                                if (mmrRes.statusCode == 200) {
+                                    try {
+                                        auto j = json::parse(mmrRes.body);
+                                        int tier = 0, rr = 0, totalWins = 0, totalGames = 0, peakTier = 0, peakRR = 0;
+                                        if (j.contains("LatestCompetitiveUpdate") && !j["LatestCompetitiveUpdate"].is_null()) {
+                                            auto lcu = j["LatestCompetitiveUpdate"];
+                                            if (lcu.contains("TierAfterUpdate") && !lcu["TierAfterUpdate"].is_null()) tier = lcu["TierAfterUpdate"].get<int>();
+                                            if (lcu.contains("RankedRatingAfterUpdate") && !lcu["RankedRatingAfterUpdate"].is_null()) rr = lcu["RankedRatingAfterUpdate"].get<int>();
+                                        }
+                                        if (j.contains("QueueSkills") && j["QueueSkills"].contains("competitive")) {
+                                            auto comp = j["QueueSkills"]["competitive"];
+                                            std::string latestSeasonId;
+                                            if (j.contains("LatestCompetitiveUpdate") && !j["LatestCompetitiveUpdate"].is_null()) {
+                                                latestSeasonId = getJsonKeyStr(j["LatestCompetitiveUpdate"], {"SeasonID"});
+                                            }
+                                            if (comp.contains("SeasonalInfoBySeasonID") && comp["SeasonalInfoBySeasonID"].is_object()) {
+                                                auto seasons = comp["SeasonalInfoBySeasonID"];
+                                                if (!latestSeasonId.empty() && seasons.contains(latestSeasonId)) {
+                                                    auto sData = seasons[latestSeasonId];
+                                                    if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
+                                                        int t = sData["CompetitiveTier"].get<int>();
+                                                        if (t > 0) {
+                                                            tier = t;
+                                                            if (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) rr = sData["RankedRating"].get<int>();
+                                                        }
+                                                    }
+                                                    if (sData.contains("NumberOfGames") && sData["NumberOfGames"].is_number()) totalGames = sData["NumberOfGames"].get<int>();
+                                                    if (sData.contains("NumberOfWinsWithPlacements") && sData["NumberOfWinsWithPlacements"].is_number()) totalWins = sData["NumberOfWinsWithPlacements"].get<int>();
+                                                }
+                                                for (const auto& [sId, sData] : seasons.items()) {
+                                                    if (sData.contains("CompetitiveTier") && !sData["CompetitiveTier"].is_null()) {
+                                                        int t = sData["CompetitiveTier"].get<int>();
+                                                        if (t > peakTier) {
+                                                            peakTier = t;
+                                                            peakRR = (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) ? sData["RankedRating"].get<int>() : 0;
+                                                        } else if (t == peakTier) {
+                                                            int r = (sData.contains("RankedRating") && !sData["RankedRating"].is_null()) ? sData["RankedRating"].get<int>() : 0;
+                                                            if (r > peakRR) peakRR = r;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                                        g_rankCache[myPuuid] = {tier, rr, totalWins, std::max(0, totalGames - totalWins), peakTier, peakRR};
+                                    } catch (...) {}
+                                }
                             }).detach();
                         }
 

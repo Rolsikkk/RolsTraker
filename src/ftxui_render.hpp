@@ -139,6 +139,68 @@ inline Color getRankColorFTX(int tier) {
     return Color::GrayDark;                               // Unrated
 }
 
+inline ftxui::Element renderMyMMRBadge(int tier, int rr, int peakTier = 0, int peakRR = 0, int avgLobbyElo = 0) {
+    if (tier < 3) {
+        if (peakTier >= 3) {
+            std::string peakName = "";
+            if (peakTier >= 3 && peakTier <= 5) peakName = "Железо " + std::to_string(peakTier - 2);
+            else if (peakTier >= 6 && peakTier <= 8) peakName = "Бронза " + std::to_string(peakTier - 5);
+            else if (peakTier >= 9 && peakTier <= 11) peakName = "Серебро " + std::to_string(peakTier - 8);
+            else if (peakTier >= 12 && peakTier <= 14) peakName = "Золото " + std::to_string(peakTier - 11);
+            else if (peakTier >= 15 && peakTier <= 17) peakName = "Платина " + std::to_string(peakTier - 14);
+            else if (peakTier >= 18 && peakTier <= 20) peakName = "Алмаз " + std::to_string(peakTier - 17);
+            else if (peakTier >= 21 && peakTier <= 23) peakName = "Расцвет " + std::to_string(peakTier - 20);
+            else if (peakTier >= 24 && peakTier <= 26) peakName = "Бессмертный " + std::to_string(peakTier - 23);
+            else if (peakTier >= 27) peakName = "Радиант";
+            int peakElo = (peakTier - 2) * 100 + peakRR;
+            return ftxui::hbox({
+                ftxui::text(" ⚡ Скрытый MMR: ") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight),
+                ftxui::text("Unrated ") | ftxui::bold | ftxui::color(ftxui::Color::GrayLight),
+                ftxui::text("[Пик: " + peakName + " • " + std::to_string(peakElo) + " ELO]") | ftxui::bold | ftxui::color(getRankColorFTX(peakTier))
+            }) | ftxui::center;
+        }
+        return ftxui::hbox({
+            ftxui::text(" ⚡ Скрытый MMR: ") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight),
+            ftxui::text("Unrated (Калибровка)") | ftxui::bold | ftxui::color(ftxui::Color::GrayLight)
+        }) | ftxui::center;
+    }
+
+    int myElo = (tier - 2) * 100 + rr;
+    std::string rankName = "";
+    if (tier >= 3 && tier <= 5) rankName = "Железо " + std::to_string(tier - 2);
+    else if (tier >= 6 && tier <= 8) rankName = "Бронза " + std::to_string(tier - 5);
+    else if (tier >= 9 && tier <= 11) rankName = "Серебро " + std::to_string(tier - 8);
+    else if (tier >= 12 && tier <= 14) rankName = "Золото " + std::to_string(tier - 11);
+    else if (tier >= 15 && tier <= 17) rankName = "Платина " + std::to_string(tier - 14);
+    else if (tier >= 18 && tier <= 20) rankName = "Алмаз " + std::to_string(tier - 17);
+    else if (tier >= 21 && tier <= 23) rankName = "Расцвет " + std::to_string(tier - 20);
+    else if (tier >= 24 && tier <= 26) rankName = "Бессмертный " + std::to_string(tier - 23);
+    else if (tier >= 27) rankName = "Радиант";
+
+    ftxui::Color rankColor = getRankColorFTX(tier);
+
+    std::vector<ftxui::Element> parts;
+    parts.push_back(ftxui::text(" ⚡ Скрытый MMR: ") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight));
+    parts.push_back(ftxui::text(std::to_string(myElo) + " ELO ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight));
+    parts.push_back(ftxui::text("[" + rankName + " • " + std::to_string(rr) + " RR] ") | ftxui::bold | ftxui::color(rankColor));
+
+    if (avgLobbyElo > 0) {
+        int diff = myElo - avgLobbyElo;
+        parts.push_back(ftxui::separator());
+        parts.push_back(ftxui::text(" Лобби: " + std::to_string(avgLobbyElo) + " ELO "));
+        if (diff > 25) {
+            parts.push_back(ftxui::text("(+" + std::to_string(diff) + " выше лобби 🚀)") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight));
+        } else if (diff < -25) {
+            parts.push_back(ftxui::text("(" + std::to_string(diff) + " ниже лобби ⚠️)") | ftxui::bold | ftxui::color(ftxui::Color::RedLight));
+        } else {
+            parts.push_back(ftxui::text("(сбалансировано ⚖️)") | ftxui::color(ftxui::Color::YellowLight));
+        }
+    }
+
+    return ftxui::hbox(std::move(parts)) | ftxui::center;
+}
+
+
 struct PartyColorInfo {
     int groupIndex;
     std::string ansiColor;
@@ -654,9 +716,29 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
     uiElements.push_back(teamsElement);
 
-    if (rankedPlayers > 0 && localElo > 0) {
+    {
+        int myTier = 0, myRR = 0, myPeakTier = 0, myPeakRR = 0;
+        for (const auto& p : state.players) {
+            if (!session.puuid.empty() && p.puuid == session.puuid) {
+                myTier = p.rankTier;
+                myRR = p.rankRR;
+                break;
+            }
+        }
+        if (!session.puuid.empty()) {
+            std::lock_guard<std::recursive_mutex> lk(g_mutex);
+            if (g_rankCache.count(session.puuid)) {
+                const auto& rk = g_rankCache[session.puuid];
+                if (myTier == 0) myTier = rk.tier;
+                if (myRR == 0) myRR = rk.rr;
+                myPeakTier = rk.peakTier;
+                myPeakRR = rk.peakRR;
+            }
+        }
+        int avgElo = (rankedPlayers > 0) ? (totalLobbyElo / rankedPlayers) : 0;
+        auto myMmrBadge = renderMyMMRBadge(myTier, myRR, myPeakTier, myPeakRR, avgElo);
         uiElements.push_back(ftxui::separator());
-        uiElements.push_back(mmrElement);
+        uiElements.push_back(myMmrBadge);
     }
 
     uiElements.push_back(ftxui::separator());
