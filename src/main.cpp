@@ -41,7 +41,7 @@ using json = nlohmann::json;
 
 // Application Version Constant
 const std::string CURRENT_VERSION = "v3.3.0";
-const std::string GITHUB_REPO     = "Rolsikkk/RolsTracker";
+const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
     float kdRatio = -1.0f;
@@ -653,46 +653,21 @@ void startUpdateDownload() {
 void checkAutoUpdate() {
     { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = "checking"; }
 
-    std::map<std::string, std::string> headers = {
-        {"User-Agent", "RolsTracker-AutoUpdater"},
-        {"Accept", "application/vnd.github.v3+json"}
-    };
-
-    std::string token = getGitHubAuthToken();
-    if (!token.empty()) {
-        headers["Authorization"] = "token " + token;
-    }
-
-    auto res = httpRequest("GET", "api.github.com", 443, "/repos/" + GITHUB_REPO + "/releases/latest", headers, "", true, false);
-
-    if (res.statusCode != 200) {
-        { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = ""; }
-        return;
-    }
-
+    // 1. Primary check: Cloudflare Worker API
     try {
-        auto release = json::parse(res.body);
-        std::string latestVersion = release.value("tag_name", "");
-        std::string releaseName = release.value("name", latestVersion);
-        std::string releaseNotes = release.value("body", "");
+        std::map<std::string, std::string> cfHeaders = {
+            {"User-Agent", "RolsTracker-AutoUpdater"},
+            {"Accept", "application/json"}
+        };
+        auto cfRes = httpRequest("GET", "rolstracker.3fun.workers.dev", 443, "/api/version", cfHeaders, "", true, false);
+        if (cfRes.statusCode == 200) {
+            auto j = json::parse(cfRes.body);
+            std::string latestVersion = j.value("version", j.value("tag_name", ""));
+            std::string releaseName = j.value("name", latestVersion);
+            std::string releaseNotes = j.value("notes", "");
+            std::string downloadUrl = j.value("download_url", "");
 
-        if (!latestVersion.empty() && isNewerVersion(latestVersion, CURRENT_VERSION)) {
-            std::string downloadUrl = "";
-            if (release.contains("assets") && release["assets"].is_array()) {
-                for (const auto& asset : release["assets"]) {
-                    std::string name = asset.value("name", "");
-                    if (name == "RolsTracker.exe" || name == "RolsTraker.exe") {
-                        if (!token.empty() && asset.contains("url") && asset["url"].is_string()) {
-                            downloadUrl = asset["url"].get<std::string>();
-                        } else {
-                            downloadUrl = asset.value("browser_download_url", "");
-                        }
-                        break;
-                    }
-                }
-            }
-
-            if (!downloadUrl.empty()) {
+            if (!latestVersion.empty() && isNewerVersion(latestVersion, CURRENT_VERSION) && !downloadUrl.empty()) {
                 std::lock_guard<std::mutex> lk(g_updateMutex);
                 g_updateInfo.available = true;
                 g_updateInfo.latestVersion = latestVersion;
@@ -707,6 +682,59 @@ void checkAutoUpdate() {
             }
         }
     } catch (...) {}
+
+    // 2. Secondary fallback: GitHub Releases API
+    std::map<std::string, std::string> headers = {
+        {"User-Agent", "RolsTracker-AutoUpdater"},
+        {"Accept", "application/vnd.github.v3+json"}
+    };
+
+    std::string token = getGitHubAuthToken();
+    if (!token.empty()) {
+        headers["Authorization"] = "token " + token;
+    }
+
+    auto res = httpRequest("GET", "api.github.com", 443, "/repos/" + GITHUB_REPO + "/releases/latest", headers, "", true, false);
+
+    if (res.statusCode == 200) {
+        try {
+            auto release = json::parse(res.body);
+            std::string latestVersion = release.value("tag_name", "");
+            std::string releaseName = release.value("name", latestVersion);
+            std::string releaseNotes = release.value("body", "");
+
+            if (!latestVersion.empty() && isNewerVersion(latestVersion, CURRENT_VERSION)) {
+                std::string downloadUrl = "";
+                if (release.contains("assets") && release["assets"].is_array()) {
+                    for (const auto& asset : release["assets"]) {
+                        std::string name = asset.value("name", "");
+                        if (name == "RolsTracker.exe" || name == "RolsTraker.exe") {
+                            if (!token.empty() && asset.contains("url") && asset["url"].is_string()) {
+                                downloadUrl = asset["url"].get<std::string>();
+                            } else {
+                                downloadUrl = asset.value("browser_download_url", "");
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (!downloadUrl.empty()) {
+                    std::lock_guard<std::mutex> lk(g_updateMutex);
+                    g_updateInfo.available = true;
+                    g_updateInfo.latestVersion = latestVersion;
+                    g_updateInfo.releaseTitle = releaseName;
+                    g_updateInfo.releaseNotes = releaseNotes;
+                    g_updateInfo.downloadUrl = downloadUrl;
+                    g_updateInfo.isDownloading = false;
+                    g_updateInfo.statusText = "";
+                    g_updateStatus = "available " + latestVersion;
+                    g_showUpdateModal = true;
+                    return;
+                }
+            }
+        } catch (...) {}
+    }
 
     { std::lock_guard<std::mutex> lk(g_updateMutex); g_updateStatus = ""; }
 }
