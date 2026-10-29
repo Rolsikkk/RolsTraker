@@ -11,6 +11,7 @@
 #include <sstream>
 #include <chrono>
 #include <atomic>
+#include <cmath>
 
 using namespace ftxui;
 
@@ -684,8 +685,8 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 }
 
 inline ftxui::Element renderPostMatchOverlay(const PostMatchInfo& info) {
-    RankDisplay rankInfo = formatRank(info.tierAfter, info.rrAfter);
-    
+    using namespace ftxui;
+
     struct Rgb { int r, g, b; };
     auto getRankRgb = [](int tier) -> Rgb {
         if (tier >= 27) return {255, 215, 0};    // Radiant (Gold)
@@ -700,68 +701,256 @@ inline ftxui::Element renderPostMatchOverlay(const PostMatchInfo& info) {
         return {120, 120, 120};                  // Unrated
     };
 
-    Rgb base = getRankRgb(info.tierAfter);
+    auto getRankTierName = [](int tier) -> std::string {
+        if (tier >= 27) return "Radiant";
+        if (tier >= 24 && tier <= 26) return "Immortal " + std::to_string(tier - 23);
+        if (tier >= 21 && tier <= 23) return "Ascendant " + std::to_string(tier - 20);
+        if (tier >= 18 && tier <= 20) return "Diamond " + std::to_string(tier - 17);
+        if (tier >= 15 && tier <= 17) return "Platinum " + std::to_string(tier - 14);
+        if (tier >= 12 && tier <= 14) return "Gold " + std::to_string(tier - 11);
+        if (tier >= 9 && tier <= 11) return "Silver " + std::to_string(tier - 8);
+        if (tier >= 6 && tier <= 8) return "Bronze " + std::to_string(tier - 5);
+        if (tier >= 3 && tier <= 5) return "Iron " + std::to_string(tier - 2);
+        return "Unrated";
+    };
+
+    auto getDivisionName = [](int tier) -> std::string {
+        if (tier >= 27) return "RADIANT";
+        if (tier >= 24) return "IMMORTAL";
+        if (tier >= 21) return "ASCENDANT";
+        if (tier >= 18) return "DIAMOND";
+        if (tier >= 15) return "PLATINUM";
+        if (tier >= 12) return "GOLD";
+        if (tier >= 9)  return "SILVER";
+        if (tier >= 6)  return "BRONZE";
+        if (tier >= 3)  return "IRON";
+        return "UNRATED";
+    };
+
+    int tierBefore = (info.tierBefore > 0) ? info.tierBefore : info.tierAfter;
+    int tierAfter = (info.tierAfter > 0) ? info.tierAfter : tierBefore;
+    int targetRrBefore = std::max(0, info.rrBefore);
+    int targetRrAfter = std::max(0, info.rrAfter);
+    int rrEarned = info.rrEarned;
+    if (info.tierBefore <= 0 && targetRrBefore == 0 && rrEarned != 0) {
+        targetRrBefore = std::max(0, targetRrAfter - rrEarned);
+    }
+
+    bool isPromo = (tierAfter > tierBefore && tierBefore > 0);
+    bool isDemo = (tierAfter < tierBefore && tierAfter > 0);
+    bool isMajorPromo = isPromo && ((tierBefore - 3) / 3 != (tierAfter - 3) / 3);
+
+    auto now = std::chrono::steady_clock::now();
+    int elapsedMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(now - g_postMatchStartTime).count();
+    int elapsedSec = elapsedMs / 1000;
+    int remaining = std::max(0, 15 - elapsedSec);
+
+    // Animation progress (0.0 to 1.0) between 300ms and 2400ms
+    float animProgress = 0.0f;
+    if (elapsedMs > 300) {
+        animProgress = std::min(1.0f, (float)(elapsedMs - 300) / 2100.0f);
+    }
+    // Smooth ease-out
+    float ease = (animProgress >= 1.0f) ? 1.0f : (1.0f - std::pow(1.0f - animProgress, 2.2f));
+
+    // Rolling RR earned count
+    int displayEarned = static_cast<int>(std::round(ease * rrEarned));
+    std::string rrSign = (rrEarned > 0) ? "+" : "";
+    std::string rrText = rrSign + std::to_string(displayEarned) + " RR";
+
+    // Outcome title & colors
+    Color outcomeColor = (rrEarned > 0) ? Color::GreenLight : ((rrEarned < 0) ? Color::RedLight : Color::YellowLight);
+    std::string outcomeTitle = (rrEarned > 0) ? "ПОБЕДА" : ((rrEarned < 0) ? "ПОРАЖЕНИЕ" : "НИЧЬЯ");
+
+    // Dynamic Tier & Progress Bar calculation
+    int currentDisplayTier = tierAfter;
+    int currentDisplayRr = targetRrAfter;
+
+    if (isPromo) {
+        if (animProgress < 0.45f) {
+            currentDisplayTier = tierBefore;
+            float p1 = animProgress / 0.45f;
+            currentDisplayRr = static_cast<int>(targetRrBefore + (100 - targetRrBefore) * (1.0f - std::pow(1.0f - p1, 1.8f)));
+        } else if (animProgress < 0.55f) {
+            // Flash point / moment of rank-up!
+            currentDisplayTier = tierAfter;
+            currentDisplayRr = 0;
+        } else if (animProgress < 1.0f) {
+            currentDisplayTier = tierAfter;
+            float p2 = (animProgress - 0.55f) / 0.45f;
+            currentDisplayRr = static_cast<int>(targetRrAfter * (1.0f - std::pow(1.0f - p2, 2.0f)));
+        } else {
+            currentDisplayTier = tierAfter;
+            currentDisplayRr = targetRrAfter;
+        }
+    } else if (isDemo) {
+        if (animProgress < 0.45f) {
+            currentDisplayTier = tierBefore;
+            float p1 = animProgress / 0.45f;
+            currentDisplayRr = static_cast<int>(targetRrBefore * (1.0f - p1));
+        } else if (animProgress < 0.55f) {
+            currentDisplayTier = tierAfter;
+            currentDisplayRr = 100;
+        } else if (animProgress < 1.0f) {
+            currentDisplayTier = tierAfter;
+            float p2 = (animProgress - 0.55f) / 0.45f;
+            currentDisplayRr = static_cast<int>(100 - (100 - targetRrAfter) * (1.0f - std::pow(1.0f - p2, 2.0f)));
+        } else {
+            currentDisplayTier = tierAfter;
+            currentDisplayRr = targetRrAfter;
+        }
+    } else {
+        currentDisplayTier = tierAfter;
+        currentDisplayRr = static_cast<int>(std::round(targetRrBefore + ease * (targetRrAfter - targetRrBefore)));
+    }
+    currentDisplayRr = std::max(0, std::min(100, currentDisplayRr));
+
+    Rgb base = getRankRgb(currentDisplayTier);
     Color rankCol = Color::RGB(base.r, base.g, base.b);
     Color rankMid = Color::RGB(base.r * 6 / 10, base.g * 6 / 10, base.b * 6 / 10);
     Color rankDark = Color::RGB(base.r * 3 / 10, base.g * 3 / 10, base.b * 3 / 10);
     Color rankDeep = Color::RGB(base.r / 7, base.g / 7, base.b / 7);
 
-    // RR Earned text & color
-    std::string rrSign = (info.rrEarned > 0) ? "+" : "";
-    std::string rrText = rrSign + std::to_string(info.rrEarned) + " RR";
-    Color outcomeColor = (info.rrEarned > 0) ? Color::GreenLight : ((info.rrEarned < 0) ? Color::RedLight : Color::YellowLight);
-    std::string outcomeTitle = (info.rrEarned > 0) ? "ПОБЕДА" : ((info.rrEarned < 0) ? "ПОРАЖЕНИЕ" : "НИЧЬЯ");
+    // Rank-Up special effects & pulsing
+    Element promoCard = text("");
+    if (isPromo) {
+        if (animProgress >= 0.45f) {
+            // Animated sparkling stars
+            int sparklePhase = (elapsedMs / 120) % 4;
+            std::string starBanner;
+            if (sparklePhase == 0) starBanner = "✨ ✦ ★  ПОВЫШЕНИЕ РАНГА!  ★ ✦ ✨";
+            else if (sparklePhase == 1) starBanner = "✧ ★ ✦  ПОВЫШЕНИЕ РАНГА!  ✦ ★ ✧";
+            else if (sparklePhase == 2) starBanner = "✦ ✧ ★  ПОВЫШЕНИЕ РАНГА!  ★ ✧ ✦";
+            else starBanner = "★ ✨ ✧  ПОВЫШЕНИЕ РАНГА!  ✧ ✨ ★";
 
-    // Promotion / Demotion banner
-    Element moveElem = text("");
-    if (info.tierAfter > info.tierBefore && info.tierBefore > 0) {
-        moveElem = text(" ★ ПОВЫШЕНИЕ РАНГА! ★ ") | bold | color(Color::RGB(255, 230, 80)) | bgcolor(Color::RGB(100, 70, 0)) | center;
-    } else if (info.tierAfter < info.tierBefore && info.tierAfter > 0) {
-        moveElem = text(" ▼ ПОНИЖЕНИЕ РАНГА ▼ ") | bold | color(Color::White) | bgcolor(Color::RGB(120, 20, 20)) | center;
+            // Pulsing glow border
+            float pulse = 0.5f + 0.5f * std::sin((float)(elapsedMs - 1200) * 0.008f);
+            int pr = std::min(255, (int)(base.r * (0.85f + 0.35f * pulse)));
+            int pg = std::min(255, (int)(base.g * (0.85f + 0.35f * pulse)));
+            int pb = std::min(255, (int)(base.b * (0.85f + 0.35f * pulse)));
+            rankCol = Color::RGB(pr, pg, pb);
+            rankMid = Color::RGB(std::min(255, (int)(base.r * (0.6f + 0.25f * pulse))), std::min(255, (int)(base.g * (0.6f + 0.25f * pulse))), std::min(255, (int)(base.b * (0.6f + 0.25f * pulse))));
+
+            std::string beforeName = getRankTierName(tierBefore);
+            std::string afterName = getRankTierName(tierAfter);
+
+            Elements promoInner;
+            promoInner.push_back(text(starBanner) | bold | color(Color::RGB(255, 235, 90)) | center);
+            promoInner.push_back(text(""));
+            promoInner.push_back(
+                hbox(Elements{
+                    filler(),
+                    text(" " + beforeName + " ") | bold | color(Color::GrayLight),
+                    text("  ══════►  ") | bold | color(Color::YellowLight),
+                    text(" " + afterName + " ") | bold | color(Color::White) | bgcolor(rankDark),
+                    filler()
+                })
+            );
+
+            if (isMajorPromo) {
+                promoInner.push_back(text(""));
+                promoInner.push_back(
+                    text(" ⚡ НОВЫЙ ДИВИЗИОН: " + getDivisionName(tierAfter) + "! ⚡ ") 
+                        | bold | color(Color::CyanLight) | center
+                );
+            }
+
+            promoCard = vbox(std::move(promoInner)) 
+                | bgcolor(Color::RGB(base.r / 6, base.g / 6, base.b / 6)) 
+                | borderStyled(ftxui::DOUBLE, rankCol);
+        } else {
+            // Before rank up trigger: show charging up
+            promoCard = text(" ★ ЗАВЕРШЕНИЕ ДИВИЗИОНА... ★ ") | bold | color(Color::RGB(255, 215, 0)) | center;
+        }
+    } else if (isDemo) {
+        if (animProgress >= 0.45f) {
+            std::string beforeName = getRankTierName(tierBefore);
+            std::string afterName = getRankTierName(tierAfter);
+            promoCard = vbox(Elements{
+                text(" ▼ ПОНИЖЕНИЕ РАНГА ▼ ") | bold | color(Color::White) | bgcolor(Color::RGB(130, 20, 20)) | center,
+                text(""),
+                hbox(Elements{
+                    filler(),
+                    text(" " + beforeName + "  ══════►  " + afterName + " ") | bold | color(Color::RedLight),
+                    filler()
+                })
+            }) | bgcolor(Color::RGB(30, 10, 10)) | borderLight;
+        } else {
+            promoCard = text(" ▼ ПОНИЖЕНИЕ РАНГА ▼ ") | bold | color(Color::White) | bgcolor(Color::RGB(120, 20, 20)) | center;
+        }
     }
 
-    // RR Progress bar
-    int currentRr = std::max(0, std::min(100, info.rrAfter));
-    int barWidth = 24;
-    int filled = (currentRr * barWidth) / 100;
+    // Performance bonus line
+    Element perfElem = text("");
+    if (info.performanceBonus > 0 && animProgress >= 0.8f) {
+        perfElem = hbox(Elements{
+            filler(),
+            text(" ★ ЗВЕЗДНЫЙ БОНУС: +" + std::to_string(info.performanceBonus) + " RR за отличную игру! ★ ") 
+                | bold | color(Color::YellowLight) | bgcolor(Color::RGB(60, 45, 10)) | borderLight,
+            filler()
+        });
+    }
+
+    // Progress bar string
+    int barWidth = 26;
+    int filled = std::max(0, std::min(barWidth, (currentDisplayRr * barWidth) / 100));
     std::string barStr = "[";
     for (int i = 0; i < filled; ++i) barStr += "█";
     for (int i = filled; i < barWidth; ++i) barStr += "░";
-    barStr += "] " + std::to_string(currentRr) + " / 100 RR";
+    barStr += "] " + std::to_string(currentDisplayRr) + " / 100 RR";
 
-    // Auto-close countdown
-    auto now = std::chrono::steady_clock::now();
-    int elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - g_postMatchStartTime).count();
-    int remaining = std::max(0, 15 - elapsed);
+    // Animated Badge style
+    Color earnedBg = (outcomeColor == Color::GreenLight) ? Color::RGB(20, 100, 30) : ((outcomeColor == Color::RedLight) ? Color::RGB(130, 20, 20) : Color::RGB(60, 60, 60));
+    if (animProgress < 1.0f && rrEarned != 0) {
+        // Subtle pulse while rolling
+        if ((elapsedMs / 100) % 2 == 0) {
+            earnedBg = (outcomeColor == Color::GreenLight) ? Color::RGB(30, 130, 40) : Color::RGB(160, 30, 30);
+        }
+    }
 
-    // Core Content Card
-    auto coreCard = vbox(Elements{
-        text(""),
-        text("★ " + outcomeTitle + " ★") | bold | color(outcomeColor) | center,
-        text(""),
+    RankDisplay rankDisplayInfo = formatRank(currentDisplayTier, currentDisplayRr);
+
+    // Build the Card
+    Elements cardElements;
+    cardElements.push_back(text(""));
+    cardElements.push_back(text("★ " + outcomeTitle + " ★") | bold | color(outcomeColor) | center);
+    cardElements.push_back(text(""));
+    cardElements.push_back(
         hbox(Elements{
             filler(),
-            text("  " + rrText + "  ") | bold | color(Color::White) | bgcolor(outcomeColor == Color::GreenLight ? Color::RGB(20, 100, 30) : (outcomeColor == Color::RedLight ? Color::RGB(130, 20, 20) : Color::RGB(60, 60, 60))) | borderHeavy,
+            text("  " + rrText + "  ") | bold | color(Color::White) | bgcolor(earnedBg) | borderHeavy,
             filler()
-        }),
-        moveElem,
-        text(""),
-        separator(),
-        text(""),
-        text("ВАШ РАНГ:") | bold | color(rankCol) | center,
-        text(" " + rankInfo.name + " ") | bold | color(Color::White) | bgcolor(rankDark) | center,
-        text(""),
-        text(barStr) | bold | color(rankCol) | center,
-        text(""),
-        separator(),
-        text(""),
-        text(" Окно закроется через " + std::to_string(remaining) + " сек  (или нажмите [ESC]) ") | color(Color::GrayLight) | center,
-        text("")
-    }) 
-    | bgcolor(rankDeep) 
-    | color(Color::White) 
-    | borderStyled(ftxui::DOUBLE, rankCol)
-    | size(WIDTH, EQUAL, 64);
+        })
+    );
+
+    if (info.performanceBonus > 0 && animProgress >= 0.8f) {
+        cardElements.push_back(text(""));
+        cardElements.push_back(perfElem);
+    }
+
+    if (isPromo || isDemo) {
+        cardElements.push_back(text(""));
+        cardElements.push_back(promoCard);
+    }
+
+    cardElements.push_back(text(""));
+    cardElements.push_back(separator());
+    cardElements.push_back(text(""));
+    cardElements.push_back(text("ВАШ РАНГ:") | bold | color(rankCol) | center);
+    cardElements.push_back(text(" " + rankDisplayInfo.name + " ") | bold | color(Color::White) | bgcolor(rankDark) | center);
+    cardElements.push_back(text(""));
+    cardElements.push_back(text(barStr) | bold | color(rankCol) | center);
+    cardElements.push_back(text(""));
+    cardElements.push_back(separator());
+    cardElements.push_back(text(""));
+    cardElements.push_back(text(" Окно закроется через " + std::to_string(remaining) + " сек  (или нажмите [ESC]) ") | color(Color::GrayLight) | center);
+    cardElements.push_back(text(""));
+
+    auto coreCard = vbox(std::move(cardElements))
+        | bgcolor(rankDeep)
+        | color(Color::White)
+        | borderStyled(ftxui::DOUBLE, rankCol)
+        | size(WIDTH, EQUAL, 66);
 
     auto glowLayer = vbox(Elements{
         filler(),

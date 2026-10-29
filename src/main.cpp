@@ -40,7 +40,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.2.5";
+const std::string CURRENT_VERSION = "v3.2.6";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -4089,7 +4089,11 @@ int main() {
             }
             
             screen.PostEvent(ftxui::Event::Custom);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (g_showPostMatch) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
             } catch (const std::exception& e) {
                 Log(std::string("Polling thread error: ") + e.what());
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -4277,6 +4281,20 @@ int main() {
                 g_currentView = AppView::MAIN;
                 return true;
             }
+            return true;
+        }
+
+        // Test preview shortcut for post match animation and rank up (F8)
+        if (event == ftxui::Event::F8) {
+            g_postMatchInfo.matchId = "preview-match";
+            g_postMatchInfo.tierBefore = 14; // Gold 3
+            g_postMatchInfo.tierAfter = 15;  // Platinum 1
+            g_postMatchInfo.rrBefore = 84;
+            g_postMatchInfo.rrAfter = 21;
+            g_postMatchInfo.rrEarned = 37;
+            g_postMatchInfo.performanceBonus = 5;
+            g_postMatchStartTime = std::chrono::steady_clock::now();
+            g_showPostMatch = true;
             return true;
         }
 
