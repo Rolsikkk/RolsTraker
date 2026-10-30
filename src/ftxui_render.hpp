@@ -717,8 +717,6 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::hbox({
                 myStatsBtn
             }) | ftxui::center,
-            ftxui::text(""),
-            myMmrBadge,
             (!penaltiesStatus.empty() ? ftxui::vbox({
                 ftxui::text(""),
                 ftxui::text(" ⛔ " + penaltiesStatus + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center
@@ -876,10 +874,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
                 myPeakRR = rk.peakRR;
             }
         }
-        int avgElo = (rankedPlayers > 1) ? (totalLobbyElo / rankedPlayers) : 0;
-        auto myMmrBadge = renderMyMMRBadge(myTier, myRR, myPeakTier, myPeakRR, avgElo);
-        uiElements.push_back(ftxui::separator());
-        uiElements.push_back(myMmrBadge);
+        // ELO/MMR badge removed per user request
     }
 
     if (!penaltiesStatus.empty()) {

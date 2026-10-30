@@ -43,7 +43,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.3.9";
+const std::string CURRENT_VERSION = "v3.4.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -2530,7 +2530,7 @@ void openTrackerInBrowser(std::string gName, std::string tLine) {
 #include "ftxui_report_menu.hpp"
 #include "ftxui_chat_menu.hpp"
 
-PlayerProfileTab g_playerProfileTab = PlayerProfileTab::STATS;
+PlayerProfileTab g_playerProfileTab = PlayerProfileTab::SKINS;
 ftxui::Box g_tabSkinsBox;
 ftxui::Box g_tabStatsBox;
 std::map<std::string, PlayerWeaponLoadout> g_playerLoadouts;
@@ -4129,19 +4129,7 @@ int main() {
                                 static auto s_lastIdleRpc = std::chrono::steady_clock::now() - std::chrono::seconds(30);
                                 if (std::chrono::duration_cast<std::chrono::seconds>(now - s_lastIdleRpc).count() >= 5) {
                                     s_lastIdleRpc = now;
-                                    std::string myRankInfo = "";
-                                    if (!newSession.puuid.empty()) {
-                                        std::lock_guard<std::recursive_mutex> lk(g_mutex);
-                                        if (g_rankCache.count(newSession.puuid)) {
-                                            int t = g_rankCache[newSession.puuid].tier;
-                                            int r = g_rankCache[newSession.puuid].rr;
-                                            if (t >= 3) {
-                                                int elo = (t - 2) * 100 + r;
-                                                myRankInfo = " • " + std::to_string(elo) + " ELO";
-                                            }
-                                        }
-                                    }
-                                    updateDiscordPresence("В главном меню" + myRankInfo, "rolstracker.3fun.workers.dev");
+                                    updateDiscordPresence("В главном меню", "rolstracker.3fun.workers.dev");
                                 }
                             }
                         }
@@ -5004,7 +4992,7 @@ int main() {
                         g_selectedPlayerInfo.statsSource = sc.source;
                         g_selectedPlayerInfo.isLoading = false;
                     }
-                    g_playerProfileTab = PlayerProfileTab::STATS;
+                    g_playerProfileTab = PlayerProfileTab::SKINS;
                     g_selectedSkinWeaponUuid = "";
                     fetchPlayerLoadoutDirect(session, session.puuid);
                     g_currentView = AppView::PLAYER_STATS;
@@ -5060,7 +5048,7 @@ int main() {
                                 break;
                             }
                         }
-                        g_playerProfileTab = PlayerProfileTab::STATS;
+                        g_playerProfileTab = PlayerProfileTab::SKINS;
                         g_selectedSkinWeaponUuid = "";
                         fetchPlayerLoadoutDirect(session, puuid);
                         g_currentView = AppView::PLAYER_STATS;

@@ -114,17 +114,6 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         pPeakRR = g_rankCache[g_selectedPuuid].peakRR;
     }
 
-    std::string eloStr = "";
-    if (pTier >= 3) {
-        int elo = (pTier - 2) * 100 + pRR;
-        eloStr = std::to_string(elo) + " ELO";
-    } else if (pPeakTier >= 3) {
-        int peakElo = (pPeakTier - 2) * 100 + pPeakRR;
-        eloStr = "Unrated [Пик: " + std::to_string(peakElo) + " ELO]";
-    } else {
-        eloStr = "Калибровка";
-    }
-
     RankDisplay curRank = formatRank(pTier, pRR, pPeakTier, pPeakRR);
     RankDisplay pkRank = formatRank(pPeakTier, pPeakRR);
 
@@ -135,7 +124,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         hbox({
             text(" Игрок: ") | bold | color(Color::GrayLight),
             nameTitle,
-            text("  [ " + curRank.name + (!eloStr.empty() ? " • " + eloStr : "") + " ]") | bold | color(curRankCol),
+            text("  [ " + curRank.name + " ]") | bold | color(curRankCol),
             filler(),
             trackerBadge
         })
@@ -202,13 +191,12 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
                 bodyArt
             }) | flex,
             separator(),
-            // Right column: Ranks & Hidden MMR
+            // Right column: Ranks
             vbox({
-                text(" РАНГИ И MMR") | bold | color(Color::Green),
+                text(" РАНГИ") | bold | color(Color::Green),
                 separator(),
                 hbox(text(" Текущий:     ") | color(Color::GrayLight), text(curRank.name) | color(curRankCol) | bold),
-                hbox(text(" Пиковый:     ") | color(Color::GrayLight), text(pkRank.name) | color(pkRankCol) | bold),
-                hbox(text(" Скрытый MMR: ") | color(Color::GrayLight), text(eloStr) | color(Color::CyanLight) | bold)
+                hbox(text(" Пиковый:     ") | color(Color::GrayLight), text(pkRank.name) | color(pkRankCol) | bold)
             }) | flex
         }),
         separator(),
