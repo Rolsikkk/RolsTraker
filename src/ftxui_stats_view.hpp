@@ -205,9 +205,7 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
             text("   "),
             trackerBtn,
             text("   "),
-            renderButton(g_agentFixed ? "Сменить агента" : "Выбрать агента", g_pickAgentBtnBox, Color::GreenLight, "pick_agent_open", g_mousePressed) | reflect(g_pickAgentBtnBox),
-            text("   "),
-            renderButton("🔄 Перезапуск", g_restartBtnBox, Color::RedLight, "restart_open", g_mousePressed) | reflect(g_restartBtnBox)
+            renderButton("⚙ Настройки", g_settingsBtnBox, Color::CyanLight, "settings_open", g_mousePressed) | reflect(g_settingsBtnBox)
         }) | center
     }) | border;
 

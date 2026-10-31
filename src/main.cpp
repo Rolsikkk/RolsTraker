@@ -43,7 +43,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.5.4";
+const std::string CURRENT_VERSION = "v3.5.5";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -208,8 +208,64 @@ std::string g_fixedAgentName = "";
 bool g_agentFixed = false;
 std::string g_pickKeyBindName = "F6";
 int g_pickKeyBindVK = VK_F6;
+bool g_showSettingsModal = false;
+bool g_isListeningForKeybind = false;
+ftxui::Box g_settingsBtnBox;
+ftxui::Box g_settingsChooseAgentBox;
+ftxui::Box g_settingsClearAgentBox;
+ftxui::Box g_settingsBindKeyBox;
+ftxui::Box g_settingsRestartBox;
+ftxui::Box g_settingsResetCacheBox;
+ftxui::Box g_settingsCloseBox;
+ftxui::Box g_settingsModalBox;
 ftxui::Box g_lockNowBtnBox;
 std::map<std::string, ftxui::Box> g_bindBoxes;
+
+std::string getVkKeyName(int vk) {
+    if (vk == VK_XBUTTON1) return "MOUSE4";
+    if (vk == VK_XBUTTON2) return "MOUSE5";
+    if (vk == VK_MBUTTON) return "MOUSE3";
+    if (vk >= VK_F1 && vk <= VK_F24) return "F" + std::to_string(vk - VK_F1 + 1);
+    if (vk >= '0' && vk <= '9') return std::string(1, (char)vk);
+    if (vk >= 'A' && vk <= 'Z') return std::string(1, (char)vk);
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) return "NUM" + std::to_string(vk - VK_NUMPAD0);
+    if (vk == VK_SPACE) return "SPACE";
+    if (vk == VK_TAB) return "TAB";
+    if (vk == VK_CAPITAL) return "CAPSLOCK";
+    if (vk == VK_LSHIFT || vk == VK_RSHIFT || vk == VK_SHIFT) return "SHIFT";
+    if (vk == VK_LCONTROL || vk == VK_RCONTROL || vk == VK_CONTROL) return "CTRL";
+    if (vk == VK_LMENU || vk == VK_RMENU || vk == VK_MENU) return "ALT";
+    if (vk == VK_OEM_3) return "~";
+    if (vk == VK_OEM_MINUS) return "-";
+    if (vk == VK_OEM_PLUS) return "+";
+    if (vk == VK_OEM_4) return "[";
+    if (vk == VK_OEM_6) return "]";
+    if (vk == VK_OEM_1) return ";";
+    if (vk == VK_OEM_7) return "'";
+    if (vk == VK_OEM_COMMA) return ",";
+    if (vk == VK_OEM_PERIOD) return ".";
+    if (vk == VK_OEM_2) return "/";
+    if (vk == VK_INSERT) return "INS";
+    if (vk == VK_DELETE) return "DEL";
+    if (vk == VK_HOME) return "HOME";
+    if (vk == VK_END) return "END";
+    if (vk == VK_PRIOR) return "PGUP";
+    if (vk == VK_NEXT) return "PGDN";
+    if (vk == VK_UP) return "UP";
+    if (vk == VK_DOWN) return "DOWN";
+    if (vk == VK_LEFT) return "LEFT";
+    if (vk == VK_RIGHT) return "RIGHT";
+
+    UINT scanCode = MapVirtualKeyA(vk, MAPVK_VK_TO_VSC);
+    if (scanCode != 0) {
+        LONG lParam = (scanCode << 16);
+        char keyName[64] = {0};
+        if (GetKeyNameTextA(lParam, keyName, sizeof(keyName)) > 0) {
+            return std::string(keyName);
+        }
+    }
+    return "KEY_" + std::to_string(vk);
+}
 
 void setPickKeyBind(const std::string& name) {
     g_pickKeyBindName = name;
@@ -241,6 +297,7 @@ void saveSettings() {
         j["fixedAgentUuid"] = g_fixedAgentUuid;
         j["fixedAgentName"] = g_fixedAgentName;
         j["pickKeyBind"] = g_pickKeyBindName;
+        j["pickKeyBindVK"] = g_pickKeyBindVK;
         std::ofstream out(settingsPath);
         if (out.is_open()) {
             out << j.dump(4);
@@ -281,7 +338,12 @@ void loadSettings() {
                 g_fixedAgentName = j["fixedAgentName"].get<std::string>();
             }
             if (j.contains("pickKeyBind") && j["pickKeyBind"].is_string()) {
-                setPickKeyBind(j["pickKeyBind"].get<std::string>());
+                g_pickKeyBindName = j["pickKeyBind"].get<std::string>();
+            }
+            if (j.contains("pickKeyBindVK") && j["pickKeyBindVK"].is_number_integer()) {
+                g_pickKeyBindVK = j["pickKeyBindVK"].get<int>();
+            } else {
+                setPickKeyBind(g_pickKeyBindName);
             }
             if (!g_fixedAgentUuid.empty()) {
                 g_agentFixed = true;
@@ -4327,14 +4389,34 @@ int main() {
                     }
                 }
 
-                // Global hotkey check for bind pick (works even when Valorant is focused)
-                static bool s_hotkeyWasPressed = false;
-                bool isHotkeyDown = (GetAsyncKeyState(g_pickKeyBindVK) & 0x8000) != 0;
-                if (isHotkeyDown && !s_hotkeyWasPressed) {
-                    s_hotkeyWasPressed = true;
-                    triggerBindPick(session, matchState, screen);
-                } else if (!isHotkeyDown) {
-                    s_hotkeyWasPressed = false;
+                // Keybind listening mode or global hotkey check
+                if (g_isListeningForKeybind) {
+                    for (int vk = 1; vk < 256; vk++) {
+                        if (vk == VK_LBUTTON) continue; // skip mouse left click
+                        if ((GetAsyncKeyState(vk) & 0x8000) != 0) {
+                            if (vk == VK_ESCAPE) {
+                                g_isListeningForKeybind = false;
+                            } else {
+                                g_pickKeyBindVK = vk;
+                                g_pickKeyBindName = getVkKeyName(vk);
+                                g_isListeningForKeybind = false;
+                                saveSettings();
+                                MessageBeep(MB_OK);
+                            }
+                            screen.PostEvent(ftxui::Event::Custom);
+                            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                            break;
+                        }
+                    }
+                } else {
+                    static bool s_hotkeyWasPressed = false;
+                    bool isHotkeyDown = (GetAsyncKeyState(g_pickKeyBindVK) & 0x8000) != 0;
+                    if (isHotkeyDown && !s_hotkeyWasPressed) {
+                        s_hotkeyWasPressed = true;
+                        triggerBindPick(session, matchState, screen);
+                    } else if (!isHotkeyDown) {
+                        s_hotkeyWasPressed = false;
+                    }
                 }
 
                 if (currentPhase == "pregame" && g_agentFixed && !g_fixedAgentName.empty()) {
@@ -4769,7 +4851,15 @@ int main() {
                 }
             }
 
-            if (g_showRestartModal) {
+            if (g_showSettingsModal) {
+                try {
+                    return ftxui::dbox({ content, renderSettingsModal(g_mousePressed) });
+                } catch (...) {
+                    g_showSettingsModal = false;
+                }
+            }
+
+        if (g_showRestartModal) {
                 try {
                     return ftxui::dbox({ content, renderRestartModal(g_mousePressed) });
                 } catch (...) {
@@ -4794,6 +4884,72 @@ int main() {
         // Block Ctrl+C from closing app
         if (event == ftxui::Event::Special("\x03") || (event.is_character() && event.character() == "\x03")) {
             return true; 
+        }
+
+        if (g_showSettingsModal) {
+            if (event == ftxui::Event::Escape) {
+                if (g_isListeningForKeybind) {
+                    g_isListeningForKeybind = false;
+                } else {
+                    g_showSettingsModal = false;
+                }
+                return true;
+            }
+            if (event.is_mouse()) {
+                g_mouseX = event.mouse().x;
+                g_mouseY = event.mouse().y;
+                if (event.mouse().button == ftxui::Mouse::Left) {
+                    if (event.mouse().motion == ftxui::Mouse::Pressed) {
+                        g_mousePressed = true;
+                        if (g_settingsChooseAgentBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "settings_choose_agent";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            g_isListeningForKeybind = false;
+                            g_showSettingsModal = false;
+                            g_currentView = AppView::AGENT_PICK;
+                            return true;
+                        }
+                        if (g_settingsClearAgentBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "settings_clear_agent";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            g_fixedAgentUuid = "";
+                            g_fixedAgentName = "";
+                            g_agentFixed = false;
+                            saveSettings();
+                            return true;
+                        }
+                        if (g_settingsBindKeyBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "settings_bind_key";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            g_isListeningForKeybind = !g_isListeningForKeybind;
+                            return true;
+                        }
+                        if (g_settingsRestartBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "settings_restart";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            restartApp(false);
+                            return true;
+                        }
+                        if (g_settingsResetCacheBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "settings_reset_cache";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            restartApp(true);
+                            return true;
+                        }
+                        if (g_settingsCloseBox.Contain(event.mouse().x, event.mouse().y) ||
+                            (!g_settingsModalBox.Contain(event.mouse().x, event.mouse().y))) {
+                            g_activeButton = "settings_close";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            g_isListeningForKeybind = false;
+                            g_showSettingsModal = false;
+                            return true;
+                        }
+                    } else if (event.mouse().motion == ftxui::Mouse::Released) {
+                        g_mousePressed = false;
+                    }
+                }
+            }
+            return true;
         }
 
         if (g_showRestartModal) {
@@ -4835,6 +4991,12 @@ int main() {
         }
 
         if (event.is_mouse() && event.mouse().button == ftxui::Mouse::Left && event.mouse().motion == ftxui::Mouse::Pressed) {
+            if (g_settingsBtnBox.Contain(event.mouse().x, event.mouse().y)) {
+                g_activeButton = "settings_open";
+                g_lastButtonClickTime = std::chrono::steady_clock::now();
+                g_showSettingsModal = true;
+                return true;
+            }
             if (g_restartBtnBox.Contain(event.mouse().x, event.mouse().y)) {
                 g_activeButton = "restart_open";
                 g_lastButtonClickTime = std::chrono::steady_clock::now();
