@@ -75,6 +75,11 @@ extern std::string g_fixedAgentUuid;
 extern std::string g_fixedAgentName;
 extern bool g_agentFixed;
 extern std::string g_autoPickStatusText;
+extern std::string g_pickKeyBindName;
+extern int g_pickKeyBindVK;
+extern ftxui::Box g_lockNowBtnBox;
+extern std::map<std::string, ftxui::Box> g_bindBoxes;
+void setPickKeyBind(const std::string& name);
 extern ftxui::Box g_resetAgentBtnBox;
 extern ftxui::Box g_agentPickerClearBox;
 extern bool g_showRestartModal;
@@ -768,7 +773,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
         auto fixedBadge = (g_agentFixed && !g_fixedAgentName.empty()) ? ftxui::hbox({
             ftxui::text(" "),
-            ftxui::text(" [ Выбран: " + g_fixedAgentName + " (авто-пик 4с) ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
+            ftxui::text(" [ Выбран: " + g_fixedAgentName + " (пик на " + g_pickKeyBindName + ") ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
         }) : ftxui::text("");
 
         return ftxui::vbox({
@@ -989,10 +994,11 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
     auto fixedBadge = (g_agentFixed && !g_fixedAgentName.empty()) ? ftxui::hbox({
         ftxui::text(" "),
-        ftxui::text(" [ Выбран: " + g_fixedAgentName + " (авто-пик 4с) ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
+        ftxui::text(" [ Выбран: " + g_fixedAgentName + " (пик на " + g_pickKeyBindName + ") ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
     }) : ftxui::text("");
 
     ftxui::Element dodgeControl = ftxui::text("");
+    ftxui::Element lockBtn = ftxui::text("");
     if (state.phase == "pregame") {
         if (!g_dodgeConfirm) {
             dodgeControl = renderButton("УКЛОНИТЬСЯ", g_dodgeButtonBox, ftxui::Color::RedLight, "dodge", g_mousePressed) | ftxui::reflect(g_dodgeButtonBox);
@@ -1003,6 +1009,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
                 ftxui::text(" "),
                 renderButton("ОТМЕНА", g_dodgeCancelBox, ftxui::Color::GrayLight, "dodge_cancel", g_mousePressed) | ftxui::reflect(g_dodgeCancelBox)
             });
+        }
+        if (g_agentFixed && !g_fixedAgentName.empty()) {
+            lockBtn = renderButton("⚡ ПИКНУТЬ " + g_fixedAgentName + " (" + g_pickKeyBindName + ")", g_lockNowBtnBox, ftxui::Color::GreenLight, "lock_now", g_mousePressed) | ftxui::reflect(g_lockNowBtnBox);
         }
     }
 
@@ -1015,6 +1024,10 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         bottomBarItems.push_back(fixedBadge);
     }
     if (state.phase == "pregame") {
+        if (g_agentFixed && !g_fixedAgentName.empty()) {
+            bottomBarItems.push_back(ftxui::text("   "));
+            bottomBarItems.push_back(lockBtn);
+        }
         bottomBarItems.push_back(ftxui::text("   "));
         bottomBarItems.push_back(dodgeControl);
     }

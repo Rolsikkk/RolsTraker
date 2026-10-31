@@ -159,9 +159,22 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
                  | reflect(g_agentPickerBackBox) 
                  | center;
 
-    auto clearBtn = renderButton("Сбросить выбор (отключить авто-пик)", g_agentPickerClearBox, Color::RedLight, "agent_picker_clear", g_mousePressed)
+    auto clearBtn = renderButton("Сбросить выбор (отключить пик по бинду)", g_agentPickerClearBox, Color::RedLight, "agent_picker_clear", g_mousePressed)
                   | reflect(g_agentPickerClearBox)
                   | center;
+
+    std::vector<std::string> availableBinds = {"F6", "F7", "F9", "X", "C", "V"};
+    std::vector<Element> bindButtons;
+    bindButtons.push_back(text(" Клавиша бинда в игре: ") | bold | color(Color::White));
+    for (const auto& bk : availableBinds) {
+        bool isSel = (g_pickKeyBindName == bk);
+        Color bCol = isSel ? Color::GreenLight : Color::GrayLight;
+        auto btn = renderButton(isSel ? ("[" + bk + "]") : (" " + bk + " "), g_bindBoxes[bk], bCol, "bind_" + bk, g_mousePressed)
+                 | reflect(g_bindBoxes[bk]);
+        bindButtons.push_back(btn);
+        bindButtons.push_back(text(" "));
+    }
+    auto bindRow = hbox(std::move(bindButtons)) | center;
 
     std::vector<Element> bottomRow = { backBtn, text("   "), renderButton("🔄 Перезапуск", g_restartBtnBox, Color::RedLight, "restart_open", g_mousePressed) | reflect(g_restartBtnBox) };
     if (g_agentFixed && !g_fixedAgentUuid.empty()) {
@@ -172,12 +185,12 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
     auto modal = vbox({
         // Top Banner
         hbox({
-            text(" ВЫБОР АГЕНТА ДЛЯ АВТО-ПИКА ") | bold | color(Color::YellowLight),
+            text(" ВЫБОР АГЕНТА ДЛЯ ПИКА ПО БИНДУ ") | bold | color(Color::YellowLight),
             filler(),
             (g_agentFixed && !g_fixedAgentName.empty() ?
                 hbox({
                     text(" ВЫБРАН: ") | bold | color(Color::Black) | bgcolor(Color::Green),
-                    text(" " + g_fixedAgentName + " ") | bold | color(Color::White) | bgcolor(Color::RGB(30, 80, 40))
+                    text(" " + g_fixedAgentName + " (бинд " + g_pickKeyBindName + ") ") | bold | color(Color::White) | bgcolor(Color::RGB(30, 80, 40))
                 })
                 : hbox({
                     text(" КАРТА: ") | bold | color(Color::Black) | bgcolor(Color::Yellow),
@@ -186,7 +199,9 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
             )
         }),
         separator(),
-        text("Выберите агента для фиксации. При нахождении игры он автоматически пикнется через 4 сек.") | color(Color::GrayLight) | center,
+        text("Выберите агента и клавишу бинда. В игре нажмите клавишу или кликните «ПИКНУТЬ» для мгновенного пика.") | color(Color::GrayLight) | center,
+        text(""),
+        bindRow,
         statusElement,
         separator(),
         hbox(std::move(columnElements)),
