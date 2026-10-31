@@ -615,8 +615,9 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
             path = "/";
         }
 
-        HINTERNET hSession = WinHttpOpen(L"Mozilla/5.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        HINTERNET hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64)", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!hSession) return false;
+        WinHttpSetTimeouts(hSession, 15000, 30000, 30000, 120000);
 
         std::wstring wHost = utf8ToWide(host);
         std::wstring wPath = utf8ToWide(path);
@@ -693,13 +694,16 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
                 return false;
             }
 
+            std::vector<char> buffer(65536);
             DWORD dwDownloaded = 0;
             DWORD totalDownloaded = 0;
             int lastPercent = -1;
 
-            while (WinHttpQueryDataAvailable(hRequest, &dwSize) && dwSize > 0) {
-                std::vector<char> buffer(dwSize);
-                if (!WinHttpReadData(hRequest, (LPVOID)buffer.data(), dwSize, &dwDownloaded) || dwDownloaded == 0) break;
+            while (true) {
+                BOOL bRead = WinHttpReadData(hRequest, (LPVOID)buffer.data(), (DWORD)buffer.size(), &dwDownloaded);
+                if (!bRead || dwDownloaded == 0) {
+                    break;
+                }
                 outFile.write(buffer.data(), dwDownloaded);
                 totalDownloaded += dwDownloaded;
 
@@ -720,7 +724,20 @@ bool downloadFileWithRedirects(const std::string& initialUrl, const std::string&
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
             Log("[DOWNLOAD] Download finished. Total bytes: " + std::to_string(totalDownloaded));
-            return (totalDownloaded > 0);
+
+            if (hasContentLength && contentLength > 0 && totalDownloaded < contentLength) {
+                Log("[DOWNLOAD] ERROR: Incomplete download! Expected " + std::to_string(contentLength) + ", got " + std::to_string(totalDownloaded));
+                DeleteFileA(outputPath.c_str());
+                return false;
+            }
+
+            if (totalDownloaded < 5000000) {
+                Log("[DOWNLOAD] ERROR: Downloaded file too small (" + std::to_string(totalDownloaded) + " bytes). Aborting.");
+                DeleteFileA(outputPath.c_str());
+                return false;
+            }
+
+            return true;
         }
 
         Log("[DOWNLOAD] Download failed at URL: " + currentUrl + " with HTTP code: " + std::to_string(dwStatusCode) + " (LastError=" + std::to_string(GetLastError()) + ")");
@@ -842,6 +859,16 @@ void startUpdateDownload() {
 
         std::string token = getGitHubAuthToken();
         if (downloadFileWithRedirects(downloadUrl, newExePath, token, progressCb)) {
+            std::error_code ec;
+            auto fsize = std::filesystem::file_size(newExePath, ec);
+            if (ec || fsize < 5000000) {
+                Log("[DOWNLOAD] Validation failed on downloaded file. Size: " + std::to_string(fsize));
+                DeleteFileA(newExePath.c_str());
+                std::lock_guard<std::mutex> lk(g_updateMutex);
+                g_updateInfo.isDownloading = false;
+                g_updateInfo.statusText = "Ошибка: неполный файл. Попробуйте позже.";
+                return;
+            }
             {
                 std::lock_guard<std::mutex> lk(g_updateMutex);
                 g_updateInfo.statusText = "Установка и перезапуск...";
