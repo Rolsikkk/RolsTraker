@@ -203,7 +203,9 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         hbox({
             backBtn,
             text("   "),
-            trackerBtn
+        trackerBtn,
+        text("   "),
+        renderButton("🔄 Перезапуск", g_restartBtnBox, Color::RedLight, "restart_open", g_mousePressed) | reflect(g_restartBtnBox)
         }) | center
     }) | border;
 

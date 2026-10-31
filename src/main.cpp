@@ -43,7 +43,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.5.0";
+const std::string CURRENT_VERSION = "v3.5.1";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -160,6 +160,30 @@ std::string getLogFilePath() {
         }
     }
     return getExeDir() + "\\debug.log";
+}
+
+void restartApp(bool clearCache = false) {
+    if (clearCache) {
+        try {
+            std::string appData = getAppDataDir();
+            std::error_code ec;
+            std::filesystem::remove(appData + "\\settings.json", ec);
+            std::filesystem::remove(appData + "\\weapons_cache.json", ec);
+            std::string exeDir = getExeDir();
+            std::filesystem::remove(exeDir + "\\settings.json", ec);
+            std::filesystem::remove(exeDir + "\\weapons_cache.json", ec);
+        } catch (...) {}
+    }
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    STARTUPINFOA si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    if (CreateProcessA(exePath, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+    g_running = false;
+    exit(0);
 }
 
 void Log(const std::string& msg) {
@@ -1050,6 +1074,12 @@ std::set<std::string> g_ownedAgents;
 std::string g_autoPickStatusText = "";
 ftxui::Box g_resetAgentBtnBox;
 ftxui::Box g_agentPickerClearBox;
+bool g_showRestartModal = false;
+ftxui::Box g_restartBtnBox;
+ftxui::Box g_restartYesBox;
+ftxui::Box g_restartNoBox;
+ftxui::Box g_restartResetCacheBox;
+ftxui::Box g_restartModalBox;
 ftxui::Box g_reportOpenBox;
 ftxui::Box g_reportCloseBox;
 std::map<std::string, ftxui::Box> g_reportEnemyBoxes;
@@ -2912,7 +2942,7 @@ static bool getPlayerLoadout(const std::string& puuid, PlayerWeaponLoadout& out)
     return false;
 }
 
-static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Session& session) {
+static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Session& session, const std::string& fallbackPuuid = "") {
     try {
         auto j = json::parse(jsonBody);
         
@@ -2931,6 +2961,7 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
                 } else {
                     jLoadout = entry;
                 }
+                if (subject.empty() && !fallbackPuuid.empty()) subject = fallbackPuuid;
                 if (subject.empty()) continue;
 
                 PlayerWeaponLoadout pLoadout;
@@ -3018,6 +3049,7 @@ static void parseMatchLoadoutsResponse(const std::string& jsonBody, const Sessio
         
         if (j.contains("Guns") && j["Guns"].is_array()) {
             std::string subject = getJsonKeyStr(j, {"Subject", "subject"});
+            if (subject.empty() && !fallbackPuuid.empty()) subject = fallbackPuuid;
             if (subject.empty()) subject = session.puuid;
 
             PlayerWeaponLoadout pLoadout;
@@ -3081,10 +3113,10 @@ static void fetchPlayerLoadoutDirect(const Session& session, const std::string& 
             {"X-Riot-ClientVersion", session.clientVersion}
         };
 
-        if (puuid == session.puuid && !session.pdHost.empty()) {
+        if (!puuid.empty() && !session.pdHost.empty()) {
             auto res = httpRequest("GET", session.pdHost, 443, "/personalization/v2/players/" + puuid + "/playerloadout", headers, "", true, false);
             if (res.statusCode == 200) {
-                parseMatchLoadoutsResponse(res.body, session);
+                    parseMatchLoadoutsResponse(res.body, session, puuid);
                 return;
             }
         }
@@ -3101,13 +3133,13 @@ static void fetchPlayerLoadoutDirect(const Session& session, const std::string& 
             if (phase == "coregame") {
                 auto res = httpRequest("GET", session.glzHost, 443, "/core-game/v1/matches/" + matchId + "/loadouts", headers, "", true, false);
                 if (res.statusCode == 200) {
-                    parseMatchLoadoutsResponse(res.body, session);
+                    parseMatchLoadoutsResponse(res.body, session, puuid);
                     return;
                 }
             } else if (phase == "pregame") {
                 auto res = httpRequest("GET", session.glzHost, 443, "/pregame/v1/matches/" + matchId + "/loadouts", headers, "", true, false);
                 if (res.statusCode == 200) {
-                    parseMatchLoadoutsResponse(res.body, session);
+                    parseMatchLoadoutsResponse(res.body, session, puuid);
                     return;
                 }
             }
@@ -3152,8 +3184,14 @@ static void updateMatchLoadouts(const Session& session, const MatchState& state)
     g_lastLoadoutFetchTime = now;
     std::string matchId = state.matchId;
     std::string phase = state.phase;
+    std::vector<std::string> playerPuuids;
+    for (const auto& p : state.players) {
+        if (!p.puuid.empty()) {
+            playerPuuids.push_back(p.puuid);
+        }
+    }
 
-    std::thread([session, matchId, phase]() {
+    std::thread([session, matchId, phase, playerPuuids]() {
         std::map<std::string, std::string> headers = {
             {"Authorization", "Bearer " + session.accessToken},
             {"X-Riot-Entitlements-JWT", session.token},
@@ -3173,10 +3211,16 @@ static void updateMatchLoadouts(const Session& session, const MatchState& state)
             }
         }
 
-        if (!session.puuid.empty() && !session.pdHost.empty()) {
-            auto res = httpRequest("GET", session.pdHost, 443, "/personalization/v2/players/" + session.puuid + "/playerloadout", headers, "", true, false);
-            if (res.statusCode == 200) {
-                parseMatchLoadoutsResponse(res.body, session);
+        // Fetch individual loadouts via pdHost for any player not yet loaded
+        if (!session.pdHost.empty()) {
+            for (const auto& puuid : playerPuuids) {
+                PlayerWeaponLoadout dummy;
+                if (!getPlayerLoadout(puuid, dummy)) {
+                    auto res = httpRequest("GET", session.pdHost, 443, "/personalization/v2/players/" + puuid + "/playerloadout", headers, "", true, false);
+                    if (res.statusCode == 200) {
+                        parseMatchLoadoutsResponse(res.body, session, puuid);
+                    }
+                }
             }
         }
     }).detach();
@@ -4595,85 +4639,93 @@ int main() {
                 safeOwnedAgents = g_ownedAgents;
             }
 
+            ftxui::Element content;
             if (g_showFirstRunModal) {
                 try {
-                    return renderFirstRunModal(g_mousePressed);
+                    content = renderFirstRunModal(g_mousePressed);
                 } catch (...) {
                     g_showFirstRunModal = false;
                 }
-            }
-            if (g_showOpenLogModal) {
+            } else if (g_showOpenLogModal) {
                 try {
-                    return ftxui::dbox({
+                    content = ftxui::dbox({
                         renderFTXUI(safeMatchState, safeSession, safeLock, agentMap, mapNameMap),
                         renderOpenLogModal(g_mousePressed)
                     });
                 } catch (...) {
                     g_showOpenLogModal = false;
                 }
-            }
-            if (g_showUpdateModal) {
+            } else if (g_showUpdateModal) {
                 try {
-                    return renderUpdateModal();
+                    content = renderUpdateModal();
                 } catch (...) {
                     g_showUpdateModal = false;
                 }
-            }
-            if (g_showPostMatch) {
+            } else if (g_showPostMatch) {
                 auto now = std::chrono::steady_clock::now();
                 auto elapsedSec = std::chrono::duration_cast<std::chrono::seconds>(now - g_postMatchStartTime).count();
                 if (elapsedSec >= 15) {
                     g_showPostMatch = false;
                 } else {
                     try {
-                        return renderPostMatchOverlay(g_postMatchInfo);
+                        content = renderPostMatchOverlay(g_postMatchInfo);
                     } catch (...) {
                         g_showPostMatch = false;
                     }
                 }
             }
-            if (g_currentView == AppView::PLAYER_STATS) {
-                try {
-                    if (g_playerProfileTab == PlayerProfileTab::SKINS) {
-                        PlayerWeaponLoadout pLoadout;
-                        bool foundPl = getPlayerLoadout(g_selectedPuuid, pLoadout);
-                        if (!foundPl) {
-                            pLoadout.puuid = g_selectedPuuid;
-                            pLoadout.loaded = false;
+
+            if (!content) {
+                if (g_currentView == AppView::PLAYER_STATS) {
+                    try {
+                        if (g_playerProfileTab == PlayerProfileTab::SKINS) {
+                            PlayerWeaponLoadout pLoadout;
+                            bool foundPl = getPlayerLoadout(g_selectedPuuid, pLoadout);
+                            if (!foundPl || !pLoadout.loaded) {
+                                static auto s_lastAutoFetch = std::chrono::steady_clock::now() - std::chrono::seconds(5);
+                                auto now = std::chrono::steady_clock::now();
+                                if (std::chrono::duration_cast<std::chrono::milliseconds>(now - s_lastAutoFetch).count() >= 1200) {
+                                    s_lastAutoFetch = now;
+                                    fetchPlayerLoadoutDirect(safeSession, g_selectedPuuid);
+                                }
+                            }
+                            if (!foundPl) {
+                                pLoadout.puuid = g_selectedPuuid;
+                                pLoadout.loaded = false;
+                            }
+                            content = renderPlayerSkins(pLoadout);
+                        } else {
+                            content = renderPlayerStats(agentMap, mapNameMap);
                         }
-                        return renderPlayerSkins(pLoadout);
+                    } catch (...) {
+                        g_currentView = AppView::MAIN;
                     }
-                    return renderPlayerStats(agentMap, mapNameMap);
-                } catch (...) {
-                    g_currentView = AppView::MAIN;
+                } else if (g_currentView == AppView::AGENT_PICK) {
+                    try {
+                        content = renderAgentPicker(safeMatchState, mapNameMap, safeOwnedAgents);
+                    } catch (...) {
+                        g_currentView = AppView::MAIN;
+                    }
                 }
             }
-            if (g_currentView == AppView::AGENT_PICK) {
+
+            if (!content) {
                 try {
-                    return renderAgentPicker(safeMatchState, mapNameMap, safeOwnedAgents);
+                    content = renderFTXUI(safeMatchState, safeSession, safeLock, agentMap, mapNameMap);
                 } catch (...) {
-                    g_currentView = AppView::MAIN;
+                    content = ftxui::vbox({ftxui::filler(), ftxui::hbox({ftxui::filler(), ftxui::text("Ошибка отрисовки UI. Нажмите Q для выхода.") | ftxui::color(ftxui::Color::Red), ftxui::filler()}), ftxui::filler()});
                 }
             }
-            if (false) {
+
+            if (g_showRestartModal) {
                 try {
-                    return renderReportEnemyMenu(safeMatchState, safeSession, agentMap);
+                    return ftxui::dbox({ content, renderRestartModal(g_mousePressed) });
                 } catch (...) {
-                    g_currentView = AppView::MAIN;
+                    g_showRestartModal = false;
                 }
             }
-            if (false) {
-                try {
-                    return renderChatMenu();
-                } catch (...) {
-                    g_currentView = AppView::MAIN;
-                }
-            }
-            try {
-                return renderFTXUI(safeMatchState, safeSession, safeLock, agentMap, mapNameMap);
-            } catch (...) {
-                return ftxui::vbox({ftxui::filler(), ftxui::hbox({ftxui::filler(), ftxui::text("Ошибка отрисовки UI. Нажмите Q для выхода.") | ftxui::color(ftxui::Color::Red), ftxui::filler()}), ftxui::filler()});
-            }
+
+            return content;
         } catch (const std::exception& e) {
             Log(std::string("Render fatal: ") + e.what());
             return ftxui::vbox({ftxui::filler(), ftxui::hbox({ftxui::filler(), ftxui::text("Критическая ошибка UI"), ftxui::filler()}), ftxui::filler()});
@@ -4690,6 +4742,53 @@ int main() {
         // Block Ctrl+C from closing app
         if (event == ftxui::Event::Special("\x03") || (event.is_character() && event.character() == "\x03")) {
             return true; 
+        }
+
+        if (g_showRestartModal) {
+            if (event == ftxui::Event::Escape) {
+                g_showRestartModal = false;
+                return true;
+            }
+            if (event.is_mouse()) {
+                g_mouseX = event.mouse().x;
+                g_mouseY = event.mouse().y;
+                if (event.mouse().button == ftxui::Mouse::Left) {
+                    if (event.mouse().motion == ftxui::Mouse::Pressed) {
+                        g_mousePressed = true;
+                        if (g_restartYesBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "restart_yes";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            restartApp(false);
+                            return true;
+                        }
+                        if (g_restartResetCacheBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "restart_reset_cache";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            restartApp(true);
+                            return true;
+                        }
+                        if (g_restartNoBox.Contain(event.mouse().x, event.mouse().y) ||
+                            (!g_restartModalBox.Contain(event.mouse().x, event.mouse().y))) {
+                            g_activeButton = "restart_no";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            g_showRestartModal = false;
+                            return true;
+                        }
+                    } else if (event.mouse().motion == ftxui::Mouse::Released) {
+                        g_mousePressed = false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        if (event.is_mouse() && event.mouse().button == ftxui::Mouse::Left && event.mouse().motion == ftxui::Mouse::Pressed) {
+            if (g_restartBtnBox.Contain(event.mouse().x, event.mouse().y)) {
+                g_activeButton = "restart_open";
+                g_lastButtonClickTime = std::chrono::steady_clock::now();
+                g_showRestartModal = true;
+                return true;
+            }
         }
 
         if (g_showFirstRunModal) {

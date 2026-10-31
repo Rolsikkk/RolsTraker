@@ -424,8 +424,8 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     if (!loadout.loaded && loadout.weapons.empty()) {
         skinsBody = vbox(Elements{
             text(""),
-            text(" Получение данных об экипированных скинах из матча... ") | color(Color::CyanLight) | bold | center,
-            text(" (Скины считываются из активного лобби Riot Client API) ") | color(Color::GrayLight) | center,
+            text(" Загрузка скинов игрока... ") | color(Color::CyanLight) | bold | center,
+            text(" (Данные обновляются автоматически без перезапуска) ") | color(Color::GrayLight) | center,
             text("")
         }) | border;
     } else {
@@ -503,7 +503,9 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
     bottomArea.push_back(hbox(Elements{
         backBtn,
         text("   "),
-        trackerBtn
+        trackerBtn,
+        text("   "),
+        renderButton("🔄 Перезапуск", g_restartBtnBox, Color::RedLight, "restart_open", g_mousePressed) | reflect(g_restartBtnBox)
     }) | center);
 
     auto contentBox = vbox(Elements{

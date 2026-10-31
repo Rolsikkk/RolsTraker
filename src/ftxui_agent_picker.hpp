@@ -163,7 +163,7 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
                   | reflect(g_agentPickerClearBox)
                   | center;
 
-    std::vector<Element> bottomRow = { backBtn };
+    std::vector<Element> bottomRow = { backBtn, text("   "), renderButton("🔄 Перезапуск", g_restartBtnBox, Color::RedLight, "restart_open", g_mousePressed) | reflect(g_restartBtnBox) };
     if (g_agentFixed && !g_fixedAgentUuid.empty()) {
         bottomRow.push_back(text("   "));
         bottomRow.push_back(clearBtn);

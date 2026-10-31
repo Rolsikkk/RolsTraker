@@ -77,6 +77,12 @@ extern bool g_agentFixed;
 extern std::string g_autoPickStatusText;
 extern ftxui::Box g_resetAgentBtnBox;
 extern ftxui::Box g_agentPickerClearBox;
+extern bool g_showRestartModal;
+extern ftxui::Box g_restartBtnBox;
+extern ftxui::Box g_restartYesBox;
+extern ftxui::Box g_restartNoBox;
+extern ftxui::Box g_restartResetCacheBox;
+extern ftxui::Box g_restartModalBox;
 extern ftxui::Box g_reportOpenBox;
 extern ftxui::Box g_chatOpenBox;
 
@@ -273,8 +279,7 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
         ftxui::text(" Игрок ") | ftxui::bold,
         ftxui::text(" Агент ") | ftxui::bold,
         ftxui::text(" Ранг ") | ftxui::bold,
-        ftxui::text(" K/D ") | ftxui::bold,
-        ftxui::text(" W/L ") | ftxui::bold
+        ftxui::text(" K/D ") | ftxui::bold
     });
 
     for (const auto& p : team) {
@@ -397,8 +402,7 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
             nameElement,
             ftxui::text(" " + agent + " "),
             ftxui::text(" " + rankStr + " ") | ftxui::color(rColor),
-            ftxui::text(" " + kdStr + " ") | ftxui::color(kdColor),
-            ftxui::text(" " + wlStr + " ")
+            ftxui::text(" " + kdStr + " ") | ftxui::color(kdColor)
         });
     }
 
@@ -412,7 +416,6 @@ inline ftxui::Element buildTeamTable(const std::string& title, ftxui::Color titl
     table.SelectColumn(2).DecorateCells(ftxui::center);
     table.SelectColumn(3).DecorateCells(ftxui::center);
     table.SelectColumn(4).DecorateCells(ftxui::center);
-    table.SelectColumn(5).DecorateCells(ftxui::center);
 
     return ftxui::vbox({
         ftxui::text(title) | ftxui::color(titleColor) | ftxui::bold | ftxui::center,
@@ -449,6 +452,53 @@ inline ftxui::Element buildUpdateElement(const std::string& updateStatus) {
     return updateText.empty()
         ? ftxui::text("") 
         : (ftxui::text(updateText) | ftxui::color(updateColor) | ftxui::center);
+}
+
+inline ftxui::Element renderRestartModal(bool isPressed) {
+    using namespace ftxui;
+
+    auto yesBtn = renderButton(" ДА, ПЕРЕЗАПУСТИТЬ ", g_restartYesBox, Color::RedLight, "restart_yes", isPressed) | reflect(g_restartYesBox);
+    auto noBtn = renderButton(" ОТМЕНА ", g_restartNoBox, Color::GrayLight, "restart_no", isPressed) | reflect(g_restartNoBox);
+    auto resetBtn = renderButton(" СБРОСИТЬ КЭШ И ПЕРЕЗАПУСТИТЬ ", g_restartResetCacheBox, Color::YellowLight, "restart_reset_cache", isPressed) | reflect(g_restartResetCacheBox);
+
+    auto card = vbox(Elements{
+        text(" 🔄 БЫСТРЫЙ ПЕРЕЗАПУСК ") | bold | color(Color::YellowLight) | center,
+        separator(),
+        text(""),
+        text(" Перезапустить программу RolsTracker сейчас? ") | bold | color(Color::White) | center,
+        text(" (Используйте при появлении ошибок или сбоях API) ") | color(Color::GrayLight) | center,
+        text(""),
+        separator(),
+        text(""),
+        hbox(Elements{
+            filler(),
+            yesBtn,
+            text("    "),
+            noBtn,
+            filler()
+        }),
+        text(""),
+        separator(),
+        text(""),
+        hbox(Elements{
+            filler(),
+            resetBtn,
+            filler()
+        }),
+        text("")
+    })
+    | bgcolor(Color::Black)
+    | clear_under
+    | borderStyled(ftxui::BorderStyle::DOUBLE, Color::YellowLight)
+    | size(WIDTH, GREATER_THAN, 54)
+    | size(WIDTH, LESS_THAN, 80)
+    | reflect(g_restartModalBox);
+
+    return vbox(Elements{
+        filler(),
+        hbox(Elements{ filler(), card, filler() }),
+        filler()
+    });
 }
 
 inline ftxui::Element renderOpenLogModal(bool isPressed) {
@@ -939,6 +989,8 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
     uiElements.push_back(ftxui::hbox({
         ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox),
+        renderButton("🔄 ПЕРЕЗАПУСК", g_restartBtnBox, ftxui::Color::RedLight, "restart_open", g_mousePressed) | ftxui::reflect(g_restartBtnBox),
+        ftxui::text(" "),
         leftControl,
         ftxui::filler() | ftxui::flex,
         renderButton("Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
