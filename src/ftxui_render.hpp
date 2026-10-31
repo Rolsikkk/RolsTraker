@@ -768,7 +768,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
         auto fixedBadge = (g_agentFixed && !g_fixedAgentName.empty()) ? ftxui::hbox({
             ftxui::text(" "),
-            ftxui::text(" [ Выбран: " + g_fixedAgentName + " (авто-пик 8с) ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
+            ftxui::text(" [ Выбран: " + g_fixedAgentName + " (авто-пик 4с) ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
         }) : ftxui::text("");
 
         return ftxui::vbox({
@@ -989,7 +989,7 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
     auto fixedBadge = (g_agentFixed && !g_fixedAgentName.empty()) ? ftxui::hbox({
         ftxui::text(" "),
-        ftxui::text(" [ Выбран: " + g_fixedAgentName + " (авто-пик 8с) ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
+        ftxui::text(" [ Выбран: " + g_fixedAgentName + " (авто-пик 4с) ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
     }) : ftxui::text("");
 
     ftxui::Element dodgeControl = ftxui::text("");

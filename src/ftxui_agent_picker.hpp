@@ -186,7 +186,7 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
             )
         }),
         separator(),
-        text("Выберите агента для фиксации. При нахождении игры он автоматически пикнется через 8 сек.") | color(Color::GrayLight) | center,
+        text("Выберите агента для фиксации. При нахождении игры он автоматически пикнется через 4 сек.") | color(Color::GrayLight) | center,
         statusElement,
         separator(),
         hbox(std::move(columnElements)),

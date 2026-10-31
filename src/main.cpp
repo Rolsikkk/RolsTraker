@@ -43,7 +43,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.5.2";
+const std::string CURRENT_VERSION = "v3.5.3";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -4262,9 +4262,9 @@ int main() {
                     std::string targetAgentName = g_fixedAgentName;
 
                     std::thread([&matchState, targetSession, targetMatchId, targetAgentUuid, targetAgentName, &screen]() {
-                        Log("[AUTO-PICK] Match found (pregame)! ID: " + targetMatchId + ". Auto-picking " + targetAgentName + " in 8s...");
+                        Log("[AUTO-PICK] Match found (pregame)! ID: " + targetMatchId + ". Auto-picking " + targetAgentName + " in 4s...");
                         
-                        for (int remaining = 8; remaining > 0; --remaining) {
+                        for (int remaining = 4; remaining > 0; --remaining) {
                             if (!g_running) {
                                 s_autoPickInProgress = false;
                                 return;
@@ -4272,7 +4272,7 @@ int main() {
                             {
                                 std::lock_guard<std::recursive_mutex> lk(g_mutex);
                                 if (matchState.phase != "pregame" || matchState.matchId != targetMatchId) {
-                                    Log("[AUTO-PICK] Pregame ended before 8s elapsed");
+                                    Log("[AUTO-PICK] Pregame ended before 4s elapsed");
                                     g_autoPickStatusText = "";
                                     s_autoPickInProgress = false;
                                     screen.PostEvent(ftxui::Event::Custom);
@@ -5395,7 +5395,7 @@ int main() {
                         g_fixedAgentName = curAgentName;
                         g_agentFixed = true;
                         saveSettings();
-                        g_pickStatusMsg = "[OK] Зафиксирован: " + curAgentName + " (пик через 8 сек после нахождения)";
+                        g_pickStatusMsg = "[OK] Зафиксирован: " + curAgentName + " (пик через 4 сек после нахождения)";
                         screen.PostEvent(ftxui::Event::Custom);
 
                         std::thread([&screen]() {
