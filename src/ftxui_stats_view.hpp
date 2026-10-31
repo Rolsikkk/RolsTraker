@@ -203,9 +203,11 @@ inline ftxui::Element renderPlayerStats(const std::map<std::string, std::string>
         hbox({
             backBtn,
             text("   "),
-        trackerBtn,
-        text("   "),
-        renderButton("🔄 Перезапуск", g_restartBtnBox, Color::RedLight, "restart_open", g_mousePressed) | reflect(g_restartBtnBox)
+            trackerBtn,
+            text("   "),
+            renderButton(g_agentFixed ? "Сменить агента" : "Выбрать агента", g_pickAgentBtnBox, Color::GreenLight, "pick_agent_open", g_mousePressed) | reflect(g_pickAgentBtnBox),
+            text("   "),
+            renderButton("🔄 Перезапуск", g_restartBtnBox, Color::RedLight, "restart_open", g_mousePressed) | reflect(g_restartBtnBox)
         }) | center
     }) | border;
 

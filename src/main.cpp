@@ -43,7 +43,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.5.1";
+const std::string CURRENT_VERSION = "v3.5.2";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -4787,6 +4787,13 @@ int main() {
                 g_activeButton = "restart_open";
                 g_lastButtonClickTime = std::chrono::steady_clock::now();
                 g_showRestartModal = true;
+                return true;
+            }
+            if (g_pickAgentBtnBox.Contain(event.mouse().x, event.mouse().y) && g_currentView != AppView::AGENT_PICK) {
+                g_activeButton = "pick_agent_open";
+                g_lastButtonClickTime = std::chrono::steady_clock::now();
+                g_pickStatusMsg = "";
+                g_currentView = AppView::AGENT_PICK;
                 return true;
             }
         }

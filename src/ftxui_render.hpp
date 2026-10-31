@@ -762,6 +762,15 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
         auto myMmrBadge = renderMyMMRBadge(myTier, myRR, myPeakTier, myPeakRR, 0);
 
+        std::string pickBtnLabel = g_agentFixed ? "СМЕНИТЬ АГЕНТА" : "ВЫБРАТЬ АГЕНТА";
+        auto agentPickBtn = renderButton(pickBtnLabel, g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox);
+        auto restartBtn = renderButton("🔄 ПЕРЕЗАПУСК", g_restartBtnBox, ftxui::Color::RedLight, "restart_open", g_mousePressed) | ftxui::reflect(g_restartBtnBox);
+
+        auto fixedBadge = (g_agentFixed && !g_fixedAgentName.empty()) ? ftxui::hbox({
+            ftxui::text(" "),
+            ftxui::text(" [ Выбран: " + g_fixedAgentName + " (авто-пик 8с) ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
+        }) : ftxui::text("");
+
         return ftxui::vbox({
             ftxui::filler(),
             circleSpinner(frame) | ftxui::bold | ftxui::color(ftxui::Color::Cyan) | ftxui::center,
@@ -780,6 +789,10 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler(),
             ftxui::hbox({
                 ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox),
+                restartBtn,
+                ftxui::text("   "),
+                agentPickBtn,
+                fixedBadge,
                 ftxui::filler()
             })
         });
@@ -970,32 +983,46 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
     uiElements.push_back(ftxui::separator());
 
-    ftxui::Element leftControl = ftxui::text("");
+    std::string pickBtnLabel = g_agentFixed ? "СМЕНИТЬ АГЕНТА" : "ВЫБРАТЬ АГЕНТА";
+    auto agentControl = renderButton(pickBtnLabel, g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox);
+    auto restartBtn = renderButton("🔄 ПЕРЕЗАПУСК", g_restartBtnBox, ftxui::Color::RedLight, "restart_open", g_mousePressed) | ftxui::reflect(g_restartBtnBox);
+
+    auto fixedBadge = (g_agentFixed && !g_fixedAgentName.empty()) ? ftxui::hbox({
+        ftxui::text(" "),
+        ftxui::text(" [ Выбран: " + g_fixedAgentName + " (авто-пик 8с) ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
+    }) : ftxui::text("");
+
+    ftxui::Element dodgeControl = ftxui::text("");
     if (state.phase == "pregame") {
         if (!g_dodgeConfirm) {
-            leftControl = renderButton("УКЛОНИТЬСЯ", g_dodgeButtonBox, ftxui::Color::RedLight, "dodge", g_mousePressed) | ftxui::reflect(g_dodgeButtonBox);
+            dodgeControl = renderButton("УКЛОНИТЬСЯ", g_dodgeButtonBox, ftxui::Color::RedLight, "dodge", g_mousePressed) | ftxui::reflect(g_dodgeButtonBox);
         } else {
-            leftControl = ftxui::hbox({
+            dodgeControl = ftxui::hbox({
                 ftxui::text(" Выйти? ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
                 renderButton("ДА", g_dodgeConfirmBox, ftxui::Color::RedLight, "dodge_confirm", g_mousePressed) | ftxui::reflect(g_dodgeConfirmBox),
                 ftxui::text(" "),
                 renderButton("ОТМЕНА", g_dodgeCancelBox, ftxui::Color::GrayLight, "dodge_cancel", g_mousePressed) | ftxui::reflect(g_dodgeCancelBox)
             });
         }
-    } else if (state.phase != "coregame") {
-        std::string pickBtnLabel = g_agentFixed ? "СМЕНИТЬ АГЕНТА" : "ВЫБРАТЬ АГЕНТА";
-        leftControl = renderButton(pickBtnLabel, g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox);
     }
 
-    uiElements.push_back(ftxui::hbox({
-        ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox),
-        renderButton("🔄 ПЕРЕЗАПУСК", g_restartBtnBox, ftxui::Color::RedLight, "restart_open", g_mousePressed) | ftxui::reflect(g_restartBtnBox),
-        ftxui::text(" "),
-        leftControl,
-        ftxui::filler() | ftxui::flex,
-        renderButton("Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
-        ftxui::filler() | ftxui::flex
-    }));
+    std::vector<ftxui::Element> bottomBarItems;
+    bottomBarItems.push_back(ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox));
+    bottomBarItems.push_back(restartBtn);
+    bottomBarItems.push_back(ftxui::text("   "));
+    bottomBarItems.push_back(agentControl);
+    if (g_agentFixed && !g_fixedAgentName.empty()) {
+        bottomBarItems.push_back(fixedBadge);
+    }
+    if (state.phase == "pregame") {
+        bottomBarItems.push_back(ftxui::text("   "));
+        bottomBarItems.push_back(dodgeControl);
+    }
+    bottomBarItems.push_back(ftxui::filler() | ftxui::flex);
+    bottomBarItems.push_back(renderButton("Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox));
+    bottomBarItems.push_back(ftxui::filler() | ftxui::flex);
+
+    uiElements.push_back(ftxui::hbox(std::move(bottomBarItems)));
     return ftxui::vbox(std::move(uiElements)) | ftxui::border;
 }
 

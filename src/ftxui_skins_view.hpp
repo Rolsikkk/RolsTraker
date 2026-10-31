@@ -505,6 +505,8 @@ inline ftxui::Element renderPlayerSkins(const PlayerWeaponLoadout& loadout) {
         text("   "),
         trackerBtn,
         text("   "),
+        renderButton(g_agentFixed ? "Сменить агента" : "Выбрать агента", g_pickAgentBtnBox, Color::GreenLight, "pick_agent_open", g_mousePressed) | reflect(g_pickAgentBtnBox),
+        text("   "),
         renderButton("🔄 Перезапуск", g_restartBtnBox, Color::RedLight, "restart_open", g_mousePressed) | reflect(g_restartBtnBox)
     }) | center);
 
