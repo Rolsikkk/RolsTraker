@@ -71,6 +71,12 @@ extern std::map<std::string, ftxui::Box> g_agentBoxes;
 extern std::string g_pickStatusMsg;
 extern bool g_isLockingAgent;
 extern std::set<std::string> g_ownedAgents;
+extern std::string g_fixedAgentUuid;
+extern std::string g_fixedAgentName;
+extern bool g_agentFixed;
+extern std::string g_autoPickStatusText;
+extern ftxui::Box g_resetAgentBtnBox;
+extern ftxui::Box g_agentPickerClearBox;
 extern ftxui::Box g_reportOpenBox;
 extern ftxui::Box g_chatOpenBox;
 
@@ -882,28 +888,62 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
         uiElements.push_back(ftxui::text(" ⛔ " + penaltiesStatus + " ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center);
     }
 
+    // Agent Auto-pick indicator
+    if (g_agentFixed && !g_fixedAgentName.empty()) {
+        uiElements.push_back(ftxui::separator());
+        if (state.phase == "pregame" && !g_autoPickStatusText.empty()) {
+            uiElements.push_back(ftxui::hbox({
+                ftxui::filler(),
+                ftxui::text(" " + g_autoPickStatusText + " ") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::border,
+                ftxui::filler()
+            }) | ftxui::center);
+        } else {
+            std::vector<ftxui::Element> agentInfoItems;
+            agentInfoItems.push_back(ftxui::filler());
+            agentInfoItems.push_back(ftxui::text(" ⚡ Выбранный агент: ") | ftxui::bold | ftxui::color(ftxui::Color::White));
+            agentInfoItems.push_back(ftxui::text(g_fixedAgentName + " ") | ftxui::bold | ftxui::color(ftxui::Color::YellowLight));
+            if (state.phase != "pregame" && state.phase != "coregame") {
+                agentInfoItems.push_back(ftxui::text(" "));
+                agentInfoItems.push_back(renderButton("✖ СБРОСИТЬ", g_resetAgentBtnBox, ftxui::Color::RedLight, "reset_agent", g_mousePressed) | ftxui::reflect(g_resetAgentBtnBox));
+            }
+            agentInfoItems.push_back(ftxui::filler());
+            uiElements.push_back(ftxui::hbox(std::move(agentInfoItems)) | ftxui::center);
+        }
+    } else if (state.phase == "pregame" && !g_autoPickStatusText.empty()) {
+        uiElements.push_back(ftxui::separator());
+        uiElements.push_back(ftxui::hbox({
+            ftxui::filler(),
+            ftxui::text(" " + g_autoPickStatusText + " ") | ftxui::bold | ftxui::color(ftxui::Color::CyanLight) | ftxui::border,
+            ftxui::filler()
+        }) | ftxui::center);
+    }
+
     uiElements.push_back(ftxui::separator());
-    uiElements.push_back(ftxui::hbox({
-        ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox),
-        (state.phase == "pregame" ? (
-            !g_dodgeConfirm
-            ? ftxui::hbox({
-                renderButton("УКЛОНИТЬСЯ", g_dodgeButtonBox, ftxui::Color::RedLight, "dodge", g_mousePressed) | ftxui::reflect(g_dodgeButtonBox),
-                ftxui::text(" "),
-                renderButton("ВЫБРАТЬ АГЕНТА", g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox)
-            })
-            : ftxui::hbox({
+
+    ftxui::Element leftControl = ftxui::text("");
+    if (state.phase == "pregame") {
+        if (!g_dodgeConfirm) {
+            leftControl = renderButton("УКЛОНИТЬСЯ", g_dodgeButtonBox, ftxui::Color::RedLight, "dodge", g_mousePressed) | ftxui::reflect(g_dodgeButtonBox);
+        } else {
+            leftControl = ftxui::hbox({
                 ftxui::text(" Выйти? ") | ftxui::bold | ftxui::color(ftxui::Color::RedLight) | ftxui::center,
                 renderButton("ДА", g_dodgeConfirmBox, ftxui::Color::RedLight, "dodge_confirm", g_mousePressed) | ftxui::reflect(g_dodgeConfirmBox),
                 ftxui::text(" "),
                 renderButton("ОТМЕНА", g_dodgeCancelBox, ftxui::Color::GrayLight, "dodge_cancel", g_mousePressed) | ftxui::reflect(g_dodgeCancelBox)
-            })
-        ) : ftxui::text("")),
+            });
+        }
+    } else if (state.phase != "coregame") {
+        std::string pickBtnLabel = g_agentFixed ? "СМЕНИТЬ АГЕНТА" : "ВЫБРАТЬ АГЕНТА";
+        leftControl = renderButton(pickBtnLabel, g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox);
+    }
+
+    uiElements.push_back(ftxui::hbox({
+        ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox),
+        leftControl,
         ftxui::filler() | ftxui::flex,
         renderButton("Мои скины и статистика", g_myStatsBox, ftxui::Color::YellowLight, "my_stats", g_mousePressed) | ftxui::reflect(g_myStatsBox),
         ftxui::filler() | ftxui::flex
     }));
-
     return ftxui::vbox(std::move(uiElements)) | ftxui::border;
 }
 

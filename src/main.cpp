@@ -43,7 +43,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.4.0";
+const std::string CURRENT_VERSION = "v3.5.0";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -179,6 +179,10 @@ static std::string g_discordClientId = "1558391767168978964";
 static int g_windowWidth = 1080;
 static int g_windowHeight = 680;
 
+std::string g_fixedAgentUuid = "";
+std::string g_fixedAgentName = "";
+bool g_agentFixed = false;
+
 void saveSettings() {
     try {
         std::string settingsPath = getSettingsPath();
@@ -192,6 +196,8 @@ void saveSettings() {
         j["windowHeight"] = g_windowHeight;
         j["setupCompleted"] = g_setupCompleted;
         j["installMode"] = g_installMode;
+        j["fixedAgentUuid"] = g_fixedAgentUuid;
+        j["fixedAgentName"] = g_fixedAgentName;
         std::ofstream out(settingsPath);
         if (out.is_open()) {
             out << j.dump(4);
@@ -224,6 +230,15 @@ void loadSettings() {
             }
             if (j.contains("installMode") && j["installMode"].is_string()) {
                 g_installMode = j["installMode"].get<std::string>();
+            }
+            if (j.contains("fixedAgentUuid") && j["fixedAgentUuid"].is_string()) {
+                g_fixedAgentUuid = j["fixedAgentUuid"].get<std::string>();
+            }
+            if (j.contains("fixedAgentName") && j["fixedAgentName"].is_string()) {
+                g_fixedAgentName = j["fixedAgentName"].get<std::string>();
+            }
+            if (!g_fixedAgentUuid.empty()) {
+                g_agentFixed = true;
             }
         } else {
             saveSettings();
@@ -1032,6 +1047,9 @@ std::map<std::string, ftxui::Box> g_agentBoxes;
 std::string g_pickStatusMsg = "";
 bool g_isLockingAgent = false;
 std::set<std::string> g_ownedAgents;
+std::string g_autoPickStatusText = "";
+ftxui::Box g_resetAgentBtnBox;
+ftxui::Box g_agentPickerClearBox;
 ftxui::Box g_reportOpenBox;
 ftxui::Box g_reportCloseBox;
 std::map<std::string, ftxui::Box> g_reportEnemyBoxes;
@@ -3969,6 +3987,7 @@ int main() {
             }
             if (currentPhase == "coregame") pollInterval = 5;
             else if (currentPhase == "pregame") pollInterval = 3;
+            else if (g_agentFixed) pollInterval = 2;
             else pollInterval = 4;
             
             bool timeToRefresh = std::chrono::duration_cast<std::chrono::seconds>(now - lastCheck).count() >= pollInterval;
@@ -4147,7 +4166,7 @@ int main() {
                     g_liveMatchState = matchState;
                     g_serverRegion = session.region;
                     currentPhase = matchState.phase;
-                    if (currentPhase != "pregame" && g_currentView == AppView::AGENT_PICK) {
+                    if ((currentPhase == "pregame" || currentPhase == "coregame") && g_currentView == AppView::AGENT_PICK) {
                         g_currentView = AppView::MAIN;
                     }
                     if (currentPhase == "none") {
@@ -4155,6 +4174,79 @@ int main() {
                         g_chatCurrentCoreCid.clear();
                         g_chatCurrentAllCid.clear();
                     }
+                }
+
+                // Auto-pick agent handling when match is found (pregame)
+                static std::string s_lastAutoPickedMatchId = "";
+                static std::atomic<bool> s_autoPickInProgress{false};
+
+                if (currentPhase == "pregame" && g_agentFixed && !g_fixedAgentUuid.empty() && 
+                    !matchState.matchId.empty() && s_lastAutoPickedMatchId != matchState.matchId && !s_autoPickInProgress) {
+                    
+                    s_lastAutoPickedMatchId = matchState.matchId;
+                    s_autoPickInProgress = true;
+                    std::string targetMatchId = matchState.matchId;
+                    Session targetSession = session;
+                    std::string targetAgentUuid = g_fixedAgentUuid;
+                    std::string targetAgentName = g_fixedAgentName;
+
+                    std::thread([&matchState, targetSession, targetMatchId, targetAgentUuid, targetAgentName, &screen]() {
+                        Log("[AUTO-PICK] Match found (pregame)! ID: " + targetMatchId + ". Auto-picking " + targetAgentName + " in 8s...");
+                        
+                        for (int remaining = 8; remaining > 0; --remaining) {
+                            if (!g_running) {
+                                s_autoPickInProgress = false;
+                                return;
+                            }
+                            {
+                                std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                                if (matchState.phase != "pregame" || matchState.matchId != targetMatchId) {
+                                    Log("[AUTO-PICK] Pregame ended before 8s elapsed");
+                                    g_autoPickStatusText = "";
+                                    s_autoPickInProgress = false;
+                                    screen.PostEvent(ftxui::Event::Custom);
+                                    return;
+                                }
+                                g_autoPickStatusText = "⏳ Авто-пик [" + targetAgentName + "] через " + std::to_string(remaining) + " сек...";
+                            }
+                            screen.PostEvent(ftxui::Event::Custom);
+                            std::this_thread::sleep_for(std::chrono::seconds(1));
+                        }
+
+                        {
+                            std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                            if (matchState.phase != "pregame" || matchState.matchId != targetMatchId) {
+                                Log("[AUTO-PICK] Match ended before locking");
+                                g_autoPickStatusText = "";
+                                s_autoPickInProgress = false;
+                                screen.PostEvent(ftxui::Event::Custom);
+                                return;
+                            }
+                            g_autoPickStatusText = "⚡ Блокируем " + targetAgentName + "...";
+                        }
+                        screen.PostEvent(ftxui::Event::Custom);
+
+                        std::string err;
+                        Log("[AUTO-PICK] Sending lockInAgent for " + targetAgentName + " (" + targetAgentUuid + ")...");
+                        bool ok = lockInAgent(targetSession, targetMatchId, targetAgentUuid, err);
+                        {
+                            std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                            s_autoPickInProgress = false;
+                            if (ok) {
+                                Log("[AUTO-PICK] SUCCESS! Agent locked: " + targetAgentName);
+                                g_autoPickStatusText = "✔ УСПЕШНО ВЫБРАН: " + targetAgentName;
+                            } else {
+                                Log("[AUTO-PICK] FAILED: " + err);
+                                g_autoPickStatusText = "✖ ОШИБКА: " + err;
+                            }
+                        }
+                        screen.PostEvent(ftxui::Event::Custom);
+                    }).detach();
+                }
+
+                if (currentPhase == "none") {
+                    g_autoPickStatusText = "";
+                    s_lastAutoPickedMatchId = "";
                 }
 
                 // Detect end of game and fetch competitive updates
@@ -4837,11 +4929,21 @@ int main() {
                 }
 
                 // Check "Pick Agent" button in pregame
-                if (matchState.phase == "pregame" && g_pickAgentBtnBox.Contain(event.mouse().x, event.mouse().y)) {
+                if (matchState.phase != "pregame" && matchState.phase != "coregame" && g_pickAgentBtnBox.Contain(event.mouse().x, event.mouse().y)) {
                     g_activeButton = "pick_agent_open";
                     g_lastButtonClickTime = std::chrono::steady_clock::now();
                     g_pickStatusMsg = "";
                     g_currentView = AppView::AGENT_PICK;
+                    return true;
+                }
+                // Check "Reset Agent" button
+                if (g_agentFixed && g_resetAgentBtnBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "reset_agent";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    g_fixedAgentUuid = "";
+                    g_fixedAgentName = "";
+                    g_agentFixed = false;
+                    saveSettings();
                     return true;
                 }
 
@@ -5108,39 +5210,68 @@ int main() {
                     g_currentView = AppView::MAIN;
                     return true;
                 }
+                if (g_agentPickerClearBox.Contain(event.mouse().x, event.mouse().y)) {
+                    g_activeButton = "agent_picker_clear";
+                    g_lastButtonClickTime = std::chrono::steady_clock::now();
+                    g_fixedAgentUuid = "";
+                    g_fixedAgentName = "";
+                    g_agentFixed = false;
+                    saveSettings();
+                    g_pickStatusMsg = "[OK] Авто-пик отключен";
+                    return true;
+                }
                 for (const auto& [agentId, box] : g_agentBoxes) {
                     if (box.Contain(event.mouse().x, event.mouse().y) && !g_isLockingAgent) {
                         g_activeButton = "agent_" + agentId;
                         g_lastButtonClickTime = std::chrono::steady_clock::now();
-                        g_isLockingAgent = true;
 
                         std::string curAgentName = agentId;
                         if (g_globalAgentMap.count(agentId)) curAgentName = g_globalAgentMap[agentId];
-                        g_pickStatusMsg = "Блокируем " + curAgentName + "...";
-
-                        std::string mId = matchState.matchId;
-                        Session sess = session;
-                        std::thread([sess, mId, agentId, curAgentName, &screen]() {
-                            std::string err;
-                            bool ok = lockInAgent(sess, mId, agentId, err);
-                            {
-                                std::lock_guard<std::recursive_mutex> lk(g_mutex);
-                                g_isLockingAgent = false;
-                                if (ok) {
-                                    g_pickStatusMsg = "[OK] УСПЕШНО ЗАБЛОКИРОВАН: " + curAgentName + "!";
-                                } else {
-                                    g_pickStatusMsg = "[ОШИБКА] " + err;
-                                }
-                            }
-                            screen.PostEvent(ftxui::Event::Custom);
-                            if (ok) {
-                                std::this_thread::sleep_for(std::chrono::milliseconds(900));
+                        if (matchState.phase == "pregame") {
+                            g_isLockingAgent = true;
+                            g_pickStatusMsg = "Блокируем " + curAgentName + "...";
+                            std::string mId = matchState.matchId;
+                            Session sess = session;
+                            std::thread([sess, mId, agentId, curAgentName, &screen]() {
+                                std::string err;
+                                bool ok = lockInAgent(sess, mId, agentId, err);
                                 {
                                     std::lock_guard<std::recursive_mutex> lk(g_mutex);
-                                    g_currentView = AppView::MAIN;
+                                    g_isLockingAgent = false;
+                                    if (ok) {
+                                        g_pickStatusMsg = "[OK] УСПЕШНО ЗАБЛОКИРОВАН: " + curAgentName + "!";
+                                    } else {
+                                        g_pickStatusMsg = "[ОШИБКА] " + err;
+                                    }
                                 }
                                 screen.PostEvent(ftxui::Event::Custom);
+                                if (ok) {
+                                    std::this_thread::sleep_for(std::chrono::milliseconds(900));
+                                    {
+                                        std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                                        g_currentView = AppView::MAIN;
+                                    }
+                                    screen.PostEvent(ftxui::Event::Custom);
+                                }
+                            }).detach();
+                            return true;
+                        }
+
+                        // Outside match (in menu / lobby): Fix agent for auto-pick!
+                        g_fixedAgentUuid = agentId;
+                        g_fixedAgentName = curAgentName;
+                        g_agentFixed = true;
+                        saveSettings();
+                        g_pickStatusMsg = "[OK] Зафиксирован: " + curAgentName + " (пик через 8 сек после нахождения)";
+                        screen.PostEvent(ftxui::Event::Custom);
+
+                        std::thread([&screen]() {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(700));
+                            {
+                                std::lock_guard<std::recursive_mutex> lk(g_mutex);
+                                g_currentView = AppView::MAIN;
                             }
+                            screen.PostEvent(ftxui::Event::Custom);
                         }).detach();
                         return true;
                     }

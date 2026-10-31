@@ -125,7 +125,13 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
                 );
             } else {
                 std::string btnId = "agent_" + aid;
-                auto btn = renderButton(ag.name, g_agentBoxes[aid], grp.color, btnId, g_mousePressed)
+                std::string btnLabel = ag.name;
+                Color btnColor = grp.color;
+                if (g_fixedAgentUuid == aid) {
+                    btnLabel = "★ " + ag.name + " (ВЫБРАН) ★";
+                    btnColor = Color::GreenLight;
+                }
+                auto btn = renderButton(btnLabel, g_agentBoxes[aid], btnColor, btnId, g_mousePressed)
                          | reflect(g_agentBoxes[aid])
                          | center;
                 items.push_back(btn);
@@ -149,25 +155,43 @@ inline ftxui::Element renderAgentPicker(const MatchState& matchState, const std:
         }) | center;
     }
 
-    auto backBtn = renderButton("Назад к матчу", g_agentPickerBackBox, Color::GrayLight, "agent_picker_back", g_mousePressed) 
+    auto backBtn = renderButton("Назад в меню", g_agentPickerBackBox, Color::GrayLight, "agent_picker_back", g_mousePressed) 
                  | reflect(g_agentPickerBackBox) 
                  | center;
+
+    auto clearBtn = renderButton("Сбросить выбор (отключить авто-пик)", g_agentPickerClearBox, Color::RedLight, "agent_picker_clear", g_mousePressed)
+                  | reflect(g_agentPickerClearBox)
+                  | center;
+
+    std::vector<Element> bottomRow = { backBtn };
+    if (g_agentFixed && !g_fixedAgentUuid.empty()) {
+        bottomRow.push_back(text("   "));
+        bottomRow.push_back(clearBtn);
+    }
 
     auto modal = vbox({
         // Top Banner
         hbox({
-            text(" ВЫБОР АГЕНТА (АВТО-ПИК) ") | bold | color(Color::YellowLight),
+            text(" ВЫБОР АГЕНТА ДЛЯ АВТО-ПИКА ") | bold | color(Color::YellowLight),
             filler(),
-            text(" КАРТА: ") | bold | color(Color::Black) | bgcolor(Color::Yellow),
-            text(" " + currentMapName + " ") | bold | color(Color::White) | bgcolor(Color::RGB(50, 50, 75)),
+            (g_agentFixed && !g_fixedAgentName.empty() ?
+                hbox({
+                    text(" ВЫБРАН: ") | bold | color(Color::Black) | bgcolor(Color::Green),
+                    text(" " + g_fixedAgentName + " ") | bold | color(Color::White) | bgcolor(Color::RGB(30, 80, 40))
+                })
+                : hbox({
+                    text(" КАРТА: ") | bold | color(Color::Black) | bgcolor(Color::Yellow),
+                    text(" " + currentMapName + " ") | bold | color(Color::White) | bgcolor(Color::RGB(50, 50, 75))
+                })
+            )
         }),
         separator(),
-        text("Нажмите на любого доступного агента для мгновенного пика в игре") | color(Color::GrayLight) | center,
+        text("Выберите агента для фиксации. При нахождении игры он автоматически пикнется через 8 сек.") | color(Color::GrayLight) | center,
         statusElement,
         separator(),
         hbox(std::move(columnElements)),
         separator(),
-        backBtn
+        hbox(std::move(bottomRow)) | center
     }) | border | size(WIDTH, GREATER_THAN, 85);
 
     return vbox({
