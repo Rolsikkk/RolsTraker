@@ -1,0 +1,9 @@
+build/
+*.exe
+*.obj
+*.o
+*.dll
+*.log
+*.db
+weapons_cache.json
+.vs/
