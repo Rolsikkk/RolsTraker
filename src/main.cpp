@@ -43,7 +43,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.5.6";
+const std::string CURRENT_VERSION = "v3.5.7";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -1104,6 +1104,7 @@ bool g_showRestartModal = false;
 ftxui::Box g_restartBtnBox;
 ftxui::Box g_restartYesBox;
 ftxui::Box g_restartNoBox;
+ftxui::Box g_restartResetCacheBox;
 ftxui::Box g_restartModalBox;
 ftxui::Box g_reportOpenBox;
 ftxui::Box g_reportCloseBox;
@@ -4322,11 +4323,9 @@ int main() {
                             if (ok) {
                                 Log("[AUTO-PICK] SUCCESS! Agent locked: " + targetAgentName);
                                 g_autoPickStatusText = "✔ УСПЕШНО ВЫБРАН: " + targetAgentName;
-                                MessageBeep(MB_OK);
                             } else {
                                 Log("[AUTO-PICK] FAILED: " + err);
                                 g_autoPickStatusText = "✖ ОШИБКА: " + err;
-                                MessageBeep(MB_ICONHAND);
                             }
                         }
                         screen.PostEvent(ftxui::Event::Custom);
@@ -4804,6 +4803,12 @@ int main() {
                             g_activeButton = "restart_yes";
                             g_lastButtonClickTime = std::chrono::steady_clock::now();
                             restartApp(false);
+                            return true;
+                        }
+                        if (g_restartResetCacheBox.Contain(event.mouse().x, event.mouse().y)) {
+                            g_activeButton = "restart_reset_cache";
+                            g_lastButtonClickTime = std::chrono::steady_clock::now();
+                            restartApp(true);
                             return true;
                         }
                         if (g_restartNoBox.Contain(event.mouse().x, event.mouse().y) ||
@@ -5411,14 +5416,6 @@ int main() {
                         g_pickStatusMsg = "[OK] Зафиксирован: " + curAgentName + " (авто-пик через 4-6 сек в матче)";
                         screen.PostEvent(ftxui::Event::Custom);
 
-                        std::thread([&screen]() {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(700));
-                            {
-                                std::lock_guard<std::recursive_mutex> lk(g_mutex);
-                                g_currentView = AppView::MAIN;
-                            }
-                            screen.PostEvent(ftxui::Event::Custom);
-                        }).detach();
                         return true;
                     }
                 }
