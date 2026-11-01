@@ -43,7 +43,7 @@ using json = nlohmann::json;
 #pragma comment(lib, "ws2_32.lib")
 
 // Application Version Constant
-const std::string CURRENT_VERSION = "v3.5.7";
+const std::string CURRENT_VERSION = "v3.5.8";
 const std::string GITHUB_REPO     = "Rolsikkk/RolsTraker";
 
 struct PlayerStats {
@@ -219,8 +219,8 @@ void saveSettings() {
         j["windowHeight"] = g_windowHeight;
         j["setupCompleted"] = g_setupCompleted;
         j["installMode"] = g_installMode;
-        j["fixedAgentUuid"] = g_fixedAgentUuid;
-        j["fixedAgentName"] = g_fixedAgentName;
+        if (j.contains("fixedAgentUuid")) j.erase("fixedAgentUuid");
+        if (j.contains("fixedAgentName")) j.erase("fixedAgentName");
                 std::ofstream out(settingsPath);
         if (out.is_open()) {
             out << j.dump(4);
@@ -254,15 +254,10 @@ void loadSettings() {
             if (j.contains("installMode") && j["installMode"].is_string()) {
                 g_installMode = j["installMode"].get<std::string>();
             }
-            if (j.contains("fixedAgentUuid") && j["fixedAgentUuid"].is_string()) {
-                g_fixedAgentUuid = j["fixedAgentUuid"].get<std::string>();
-            }
-            if (j.contains("fixedAgentName") && j["fixedAgentName"].is_string()) {
-                g_fixedAgentName = j["fixedAgentName"].get<std::string>();
-            }
-            if (!g_fixedAgentUuid.empty()) {
-                g_agentFixed = true;
-            }
+            // Agent selection is strictly per-session and not restored across restarts
+            g_fixedAgentUuid = "";
+            g_fixedAgentName = "";
+            g_agentFixed = false;
         } else {
             saveSettings();
         }
