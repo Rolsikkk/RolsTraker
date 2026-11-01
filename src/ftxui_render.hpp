@@ -75,27 +75,12 @@ extern std::string g_fixedAgentUuid;
 extern std::string g_fixedAgentName;
 extern bool g_agentFixed;
 extern std::string g_autoPickStatusText;
-extern std::string g_pickKeyBindName;
-extern int g_pickKeyBindVK;
-extern bool g_showSettingsModal;
-extern bool g_isListeningForKeybind;
-extern ftxui::Box g_settingsBtnBox;
-extern ftxui::Box g_settingsChooseAgentBox;
-extern ftxui::Box g_settingsClearAgentBox;
-extern ftxui::Box g_settingsBindKeyBox;
-extern ftxui::Box g_settingsRestartBox;
-extern ftxui::Box g_settingsResetCacheBox;
-extern ftxui::Box g_settingsCloseBox;
-extern ftxui::Box g_settingsModalBox;
-extern ftxui::Box g_lockNowBtnBox;
-std::string getVkKeyName(int vk);
 extern ftxui::Box g_resetAgentBtnBox;
 extern ftxui::Box g_agentPickerClearBox;
 extern bool g_showRestartModal;
 extern ftxui::Box g_restartBtnBox;
 extern ftxui::Box g_restartYesBox;
 extern ftxui::Box g_restartNoBox;
-extern ftxui::Box g_restartResetCacheBox;
 extern ftxui::Box g_restartModalBox;
 extern ftxui::Box g_reportOpenBox;
 extern ftxui::Box g_chatOpenBox;
@@ -468,103 +453,11 @@ inline ftxui::Element buildUpdateElement(const std::string& updateStatus) {
         : (ftxui::text(updateText) | ftxui::color(updateColor) | ftxui::center);
 }
 
-inline ftxui::Element renderSettingsModal(bool isPressed) {
-    using namespace ftxui;
-
-    auto chooseAgentBtn = renderButton(g_agentFixed ? " СМЕНИТЬ АГЕНТА " : " ВЫБРАТЬ АГЕНТА ", g_settingsChooseAgentBox, Color::GreenLight, "settings_choose_agent", isPressed) | reflect(g_settingsChooseAgentBox);
-    auto clearAgentBtn = renderButton(" СБРОСИТЬ АГЕНТА ", g_settingsClearAgentBox, Color::RedLight, "settings_clear_agent", isPressed) | reflect(g_settingsClearAgentBox);
-
-    std::string bindBtnText = g_isListeningForKeybind ? " [ 🔴 НАЖМИТЕ ЛЮБУЮ КЛАВИШУ НА КЛАВИАТУРЕ... ] " : (" [ КЛАВИША: " + g_pickKeyBindName + " ] (нажмите чтобы переназначить) ");
-    Color bindBtnCol = g_isListeningForKeybind ? Color::YellowLight : Color::CyanLight;
-    auto bindBtn = renderButton(bindBtnText, g_settingsBindKeyBox, bindBtnCol, "settings_bind_key", isPressed) | reflect(g_settingsBindKeyBox);
-
-    auto restartBtn = renderButton(" 🔄 ПЕРЕЗАПУСТИТЬ ПРОГРАММУ ", g_settingsRestartBox, Color::RedLight, "settings_restart", isPressed) | reflect(g_settingsRestartBox);
-    auto resetCacheBtn = renderButton(" 🗑 СБРОСИТЬ КЭШ И ПЕРЕЗАПУСТИТЬ ", g_settingsResetCacheBox, Color::YellowLight, "settings_reset_cache", isPressed) | reflect(g_settingsResetCacheBox);
-    auto closeBtn = renderButton(" ЗАКРЫТЬ (ESC) ", g_settingsCloseBox, Color::GrayLight, "settings_close", isPressed) | reflect(g_settingsCloseBox);
-
-    std::string agentStatus = (g_agentFixed && !g_fixedAgentName.empty()) ? ("Текущий агент: " + g_fixedAgentName) : "Агент не выбран";
-    Color agentCol = g_agentFixed ? Color::GreenLight : Color::GrayLight;
-
-    auto card = vbox(Elements{
-        text(" ⚙ НАСТРОЙКИ ROLSTRACKER ") | bold | color(Color::CyanLight) | center,
-        separator(),
-        text(""),
-
-        // 1. Agent Selection Section
-        hbox(Elements{
-            text(" 👤 АВТО-ПИК / ФИКСАЦИЯ АГЕНТА ") | bold | color(Color::YellowLight),
-            filler(),
-            text(" " + agentStatus + " ") | bold | color(agentCol) | border
-        }),
-        text("  Выберите агента, которого программа будет пикать в игре по нажатию клавиши.") | color(Color::GrayLight),
-        text(""),
-        hbox(Elements{
-            chooseAgentBtn,
-            text("   "),
-            (g_agentFixed ? clearAgentBtn : text("")),
-            filler()
-        }),
-        text(""),
-        separator(),
-        text(""),
-
-        // 2. Keybind Section
-        text(" ⌨ КЛАВИША ДЛЯ ПИКА В ИГРЕ ") | bold | color(Color::YellowLight),
-        text("  Нажмите кнопку ниже и затем нажмите ЛЮБУЮ клавишу на клавиатуре или боковую кнопку мыши:") | color(Color::GrayLight),
-        text(""),
-        hbox(Elements{
-            bindBtn,
-            filler()
-        }),
-        text(""),
-        separator(),
-        text(""),
-
-        // 3. Restart Section
-        text(" 🔄 УПРАВЛЕНИЕ И ПЕРЕЗАПУСК ") | bold | color(Color::YellowLight),
-        text("  Используйте при появлении ошибок сети, сбоях Riot Client или для сброса настроек:") | color(Color::GrayLight),
-        text(""),
-        hbox(Elements{
-            restartBtn,
-            text("   "),
-            resetCacheBtn,
-            filler()
-        }),
-        text(""),
-        separator(),
-        text(""),
-
-        // 4. Close Button
-        hbox(Elements{
-            filler(),
-            closeBtn,
-            filler()
-        }),
-        text("")
-    })
-    | bgcolor(Color::Black)
-    | clear_under
-    | borderStyled(ftxui::BorderStyle::DOUBLE, Color::CyanLight)
-    | size(WIDTH, GREATER_THAN, 75)
-    | size(WIDTH, LESS_THAN, 95);
-
-    return vbox(Elements{
-        filler(),
-        hbox(Elements{
-            filler(),
-            card | reflect(g_settingsModalBox),
-            filler()
-        }),
-        filler()
-    });
-}
-
 inline ftxui::Element renderRestartModal(bool isPressed) {
     using namespace ftxui;
 
     auto yesBtn = renderButton(" ДА, ПЕРЕЗАПУСТИТЬ ", g_restartYesBox, Color::RedLight, "restart_yes", isPressed) | reflect(g_restartYesBox);
     auto noBtn = renderButton(" ОТМЕНА ", g_restartNoBox, Color::GrayLight, "restart_no", isPressed) | reflect(g_restartNoBox);
-    auto resetBtn = renderButton(" СБРОСИТЬ КЭШ И ПЕРЕЗАПУСТИТЬ ", g_restartResetCacheBox, Color::YellowLight, "restart_reset_cache", isPressed) | reflect(g_restartResetCacheBox);
 
     auto card = vbox(Elements{
         text(" 🔄 БЫСТРЫЙ ПЕРЕЗАПУСК ") | bold | color(Color::YellowLight) | center,
@@ -580,14 +473,6 @@ inline ftxui::Element renderRestartModal(bool isPressed) {
             yesBtn,
             text("    "),
             noBtn,
-            filler()
-        }),
-        text(""),
-        separator(),
-        text(""),
-        hbox(Elements{
-            filler(),
-            resetBtn,
             filler()
         }),
         text("")
@@ -867,11 +752,12 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
         auto myMmrBadge = renderMyMMRBadge(myTier, myRR, myPeakTier, myPeakRR, 0);
 
-        auto settingsBtn = renderButton("⚙ НАСТРОЙКИ", g_settingsBtnBox, ftxui::Color::CyanLight, "settings_open", g_mousePressed) | ftxui::reflect(g_settingsBtnBox);
+        auto restartBtn = renderButton("🔄 ПЕРЕЗАПУСК", g_restartBtnBox, ftxui::Color::RedLight, "restart_open", g_mousePressed) | ftxui::reflect(g_restartBtnBox);
+        auto pickAgentBtn = renderButton(g_agentFixed ? "СМЕНИТЬ АГЕНТА" : "ВЫБРАТЬ АГЕНТА", g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox);
 
         auto fixedBadge = (g_agentFixed && !g_fixedAgentName.empty()) ? ftxui::hbox({
             ftxui::text("   "),
-            ftxui::text(" [ Выбран: " + g_fixedAgentName + " (бинд " + g_pickKeyBindName + ") ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
+            ftxui::text("Выбран: " + g_fixedAgentName + " (авто-пик 4-6с)") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight)
         }) : ftxui::text("");
 
         return ftxui::vbox({
@@ -892,7 +778,9 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
             ftxui::filler(),
             ftxui::hbox({
                 ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox),
-                settingsBtn,
+                restartBtn,
+                ftxui::text("   "),
+                pickAgentBtn,
                 fixedBadge,
                 ftxui::filler()
             })
@@ -1084,15 +972,15 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
 
     uiElements.push_back(ftxui::separator());
 
-    auto settingsBtn = renderButton("⚙ НАСТРОЙКИ", g_settingsBtnBox, ftxui::Color::CyanLight, "settings_open", g_mousePressed) | ftxui::reflect(g_settingsBtnBox);
+    auto restartBtn = renderButton("🔄 ПЕРЕЗАПУСК", g_restartBtnBox, ftxui::Color::RedLight, "restart_open", g_mousePressed) | ftxui::reflect(g_restartBtnBox);
+    auto pickAgentBtn = renderButton(g_agentFixed ? "СМЕНИТЬ АГЕНТА" : "ВЫБРАТЬ АГЕНТА", g_pickAgentBtnBox, ftxui::Color::GreenLight, "pick_agent_open", g_mousePressed) | ftxui::reflect(g_pickAgentBtnBox);
 
     auto fixedBadge = (g_agentFixed && !g_fixedAgentName.empty()) ? ftxui::hbox({
         ftxui::text("   "),
-        ftxui::text(" [ Выбран: " + g_fixedAgentName + " (бинд " + g_pickKeyBindName + ") ] ") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight) | ftxui::bgcolor(ftxui::Color::RGB(10, 40, 20))
+        ftxui::text("Выбран: " + g_fixedAgentName + " (авто-пик 4-6с)") | ftxui::bold | ftxui::color(ftxui::Color::GreenLight)
     }) : ftxui::text("");
 
     ftxui::Element dodgeControl = ftxui::text("");
-    ftxui::Element lockBtn = ftxui::text("");
     if (state.phase == "pregame") {
         if (!g_dodgeConfirm) {
             dodgeControl = renderButton("УКЛОНИТЬСЯ", g_dodgeButtonBox, ftxui::Color::RedLight, "dodge", g_mousePressed) | ftxui::reflect(g_dodgeButtonBox);
@@ -1104,22 +992,17 @@ inline ftxui::Element renderFTXUI(const MatchState& state, const Session& sessio
                 renderButton("ОТМЕНА", g_dodgeCancelBox, ftxui::Color::GrayLight, "dodge_cancel", g_mousePressed) | ftxui::reflect(g_dodgeCancelBox)
             });
         }
-        if (g_agentFixed && !g_fixedAgentName.empty()) {
-            lockBtn = renderButton("⚡ ПИКНУТЬ " + g_fixedAgentName + " (" + g_pickKeyBindName + ")", g_lockNowBtnBox, ftxui::Color::GreenLight, "lock_now", g_mousePressed) | ftxui::reflect(g_lockNowBtnBox);
-        }
     }
 
     std::vector<ftxui::Element> bottomBarItems;
     bottomBarItems.push_back(ftxui::text("   ") | ftxui::color(ftxui::Color::Black) | ftxui::bgcolor(ftxui::Color::Black) | ftxui::reflect(g_hiddenLogBtnBox));
-    bottomBarItems.push_back(settingsBtn);
+    bottomBarItems.push_back(restartBtn);
+    bottomBarItems.push_back(ftxui::text("   "));
+    bottomBarItems.push_back(pickAgentBtn);
     if (g_agentFixed && !g_fixedAgentName.empty()) {
         bottomBarItems.push_back(fixedBadge);
     }
     if (state.phase == "pregame") {
-        if (g_agentFixed && !g_fixedAgentName.empty()) {
-            bottomBarItems.push_back(ftxui::text("   "));
-            bottomBarItems.push_back(lockBtn);
-        }
         bottomBarItems.push_back(ftxui::text("   "));
         bottomBarItems.push_back(dodgeControl);
     }

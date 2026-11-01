@@ -17,7 +17,7 @@ if(WIN32)
 endif()
 
 add_custom_command(TARGET RolsTracker POST_BUILD
-    COMMAND cmd /c copy /y "$<TARGET_FILE:RolsTracker>" "${CMAKE_CURRENT_SOURCE_DIR}\\RolsTracker.exe" 2>nul || exit 0
-    COMMAND cmd /c copy /y "$<TARGET_FILE:RolsTracker>" "${CMAKE_CURRENT_SOURCE_DIR}\\RolsTraker.exe" 2>nul || exit 0
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:RolsTracker>" "${CMAKE_CURRENT_SOURCE_DIR}/RolsTracker.exe"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:RolsTracker>" "${CMAKE_CURRENT_SOURCE_DIR}/RolsTraker.exe"
     COMMENT "Syncing RolsTracker.exe and RolsTraker.exe to project root"
 )
